@@ -1,0 +1,20 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\qt-calendar-app\build-local\CMakeFiles\466c8712547999a1f852b87e3d7abb2e\QtCalendarApp_build.cmake.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\qt-calendar-app\build-local\CMakeFiles\e88fc5599d7e1ed3493f7e8d7a8484f6\QtCalendarApp_qmlimportscan.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="C:\qt-calendar-app\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="C:\qt-calendar-app\build-local\CMakeFiles\QtCalendarApp_qmlimportscan" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{B8C55EAE-BD56-3D6E-B7E5-2DED6E77C6F0}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,32 @@
+^C:\QT-CALENDAR-APP\BUILD-LOCAL\CMAKEFILES\466C8712547999A1F852B87E3D7ABB2E\QTCALENDARAPP_BUILD.CMAKE.RULE
+setlocal
+cd C:\qt-calendar-app
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+call C:\qt-calendar-app\build-local\.qt\bin\qt_setup_tool_path.bat C:/Qt/6.10.2/msvc2022_64/bin/qmlimportscanner.exe -rootPath C:/qt-calendar-app -cmake-output -output-file C:/qt-calendar-app/build-local/.qt/qml_imports/QtCalendarApp_build.cmake -importPath C:/qt-calendar-app/build-local -importPath C:/Qt/6.10.2/msvc2022_64/qml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\QT-CALENDAR-APP\BUILD-LOCAL\CMAKEFILES\E88FC5599D7E1ED3493F7E8D7A8484F6\QTCALENDARAPP_QMLIMPORTSCAN.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\QT-CALENDAR-APP\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/qt-calendar-app -BC:/qt-calendar-app/build-local --check-stamp-file C:/qt-calendar-app/build-local/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
