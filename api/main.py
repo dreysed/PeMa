@@ -1990,7 +1990,7 @@ def _build_ai_context(athlete_id: str, db: Session) -> dict:
     }
     pain_ids: set[str] = set()
     for w in recent:
-        m = _re.search(r"\[PainIds:([^\]]*)\]", w.feedback or "")
+        m = _re.search(r"\[PainIds:([^\]]*)\]", w.athlete_feedback or "")
         if m:
             for pid in m.group(1).split(","):
                 pid = pid.strip()
@@ -2008,12 +2008,11 @@ def _build_ai_context(athlete_id: str, db: Session) -> dict:
     dist30 = round(sum(_effective_distance(w) for w in done30), 1)
     dur30  = sum(_effective_duration(w) for w in done30)
 
-    # Athlete name
+    # Athlete name (stored directly in AthleteDB)
     athlete = db.query(AthleteDB).filter(AthleteDB.id == athlete_id).first()
-    user    = db.query(UserDB).filter(UserDB.id == athlete.user_id).first() if athlete else None
 
     return {
-        "name":            user.name if user else "Атлет",
+        "name":            athlete.name if athlete else "Атлет",
         "goals":           goals_list,
         "pain_points":     pain_human,
         "recent_workouts": recent_list,

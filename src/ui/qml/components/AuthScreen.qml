@@ -73,7 +73,7 @@ Rectangle {
                 Rectangle {
                     width: 38; height: 38; radius: 10; color: accent
                     Label {
-                        anchors.centerIn: parent; text: "S"
+                        anchors.centerIn: parent; text: "P"
                         font.pixelSize: 20; font.weight: Font.Black; color: "#fff"
                     }
                 }
