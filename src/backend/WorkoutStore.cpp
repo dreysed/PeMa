@@ -1215,6 +1215,37 @@ void WorkoutStore::openStravaAuthUrl()
         const QString url = doc.object().value(QStringLiteral("url")).toString();
         if (!url.isEmpty()) {
             QDesktopServices::openUrl(QUrl(url));
+
+            // Poll every 3 s for up to 2 min until Strava is connected
+            if (!m_stravaTimer) {
+                m_stravaTimer = new QTimer(this);
+                m_stravaTimer->setInterval(3000);
+                connect(m_stravaTimer, &QTimer::timeout, this, [this]() {
+                    ++m_stravaPolls;
+                    if (m_stravaPolls > 40) {          // 2 min max
+                        m_stravaTimer->stop();
+                        m_stravaPolls = 0;
+                        return;
+                    }
+                    httpAsync(QStringLiteral("/api/strava/status"),
+                              [this](const QJsonDocument &d) {
+                        if (d.isNull()) return;
+                        const bool conn   = d.object().value(QStringLiteral("connected")).toBool();
+                        const bool hasCid = d.object().value(QStringLiteral("hasClientId")).toBool();
+                        if (conn) {
+                            m_stravaTimer->stop();
+                            m_stravaPolls = 0;
+                        }
+                        if (conn != m_stravaConnected || hasCid != m_stravaHasClientId) {
+                            m_stravaConnected   = conn;
+                            m_stravaHasClientId = hasCid;
+                            emit stravaStatusChanged();
+                        }
+                    });
+                });
+            }
+            m_stravaPolls = 0;
+            m_stravaTimer->start();
         }
     }
 }
@@ -1321,14 +1352,41 @@ void WorkoutStore::sendAiMessage(const QString &text)
         const auto doc = httpSync(QStringLiteral("POST"), QStringLiteral("/api/ai/chat"), body);
         m_aiTyping = false;
         emit aiTypingChanged();
-        if (doc.isNull()) return;
-        const QString reply = doc.object().value(QStringLiteral("reply")).toString();
+
+        auto appendMsg = [this](const QString &role, const QString &content) {
+            QVariantMap msg;
+            msg[QStringLiteral("role")]    = role;
+            msg[QStringLiteral("content")] = content;
+            msg[QStringLiteral("ts")]      = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm"));
+            m_chatHistory.append(msg);
+            emit chatHistoryChanged();
+        };
+
+        if (doc.isNull()) {
+            appendMsg(QStringLiteral("error"),
+                      QStringLiteral("Не удалось связаться с AI. Проверьте подключение к серверу."));
+            return;
+        }
+
+        const QJsonObject obj = doc.object();
+
+        // Check for error detail from backend (502 etc.)
+        const QString detail = obj.value(QStringLiteral("detail")).toString();
+        if (!detail.isEmpty()) {
+            appendMsg(QStringLiteral("error"), detail);
+            return;
+        }
+
+        const QString reply = obj.value(QStringLiteral("reply")).toString();
         if (reply.isEmpty()) return;
-        QVariantMap aiMsg;
-        aiMsg[QStringLiteral("role")]    = QStringLiteral("assistant");
-        aiMsg[QStringLiteral("content")] = reply;
-        aiMsg[QStringLiteral("ts")]      = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm"));
-        m_chatHistory.append(aiMsg);
-        emit chatHistoryChanged();
+
+        appendMsg(QStringLiteral("assistant"), reply);
+
+        // If AI modified the training plan — refresh calendar + analytics
+        if (obj.value(QStringLiteral("changes_made")).toBool()) {
+            fetchCalendar();
+            fetchDayWorkouts();
+            fetchAnalytics();
+        }
     });
 }

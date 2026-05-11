@@ -11,6 +11,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QTimer>
 
 class WorkoutStore : public QObject
 {
@@ -322,6 +323,10 @@ private:
     QString m_selectedAthleteId;
     QString m_errorMessage;
     bool    m_busy              = false;
+
+    // ── Strava polling ────────────────────────────────────────────────────────
+    QTimer      *m_stravaTimer      = nullptr;
+    int          m_stravaPolls      = 0;
 
     // ── AI Coach ──────────────────────────────────────────────────────────────
     QVariantList m_chatHistory;

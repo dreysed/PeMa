@@ -1702,10 +1702,12 @@ def save_strava_credentials(
     current_user.strava_client_id = data.client_id.strip()
     current_user.strava_client_secret = data.client_secret.strip()
     db.commit()
+    print(f"[Strava] Credentials saved for user {current_user.email}, client_id={data.client_id.strip()}")
 
 @app.get("/api/strava/auth-url")
 def strava_auth_url(current_user: UserDB = Depends(get_current_user)):
     cid = current_user.strava_client_id
+    print(f"[Strava] auth-url requested, client_id={cid!r}")
     if not cid:
         raise HTTPException(400, "Сначала укажите Strava Client ID в настройках")
     redirect = "http://localhost:8000/api/strava/callback"
@@ -1714,6 +1716,7 @@ def strava_auth_url(current_user: UserDB = Depends(get_current_user)):
         f"?client_id={cid}&response_type=code&redirect_uri={redirect}"
         f"&approval_prompt=force&scope=activity:read_all"
     )
+    print(f"[Strava] Opening URL: {url}")
     return {"url": url}
 
 @app.get("/api/strava/callback")
@@ -1721,21 +1724,18 @@ def strava_callback(
     code: str,
     db: Session = Depends(get_db),
 ):
-    """
-    Strava redirects here after user approves.
-    We exchange the code for tokens — but we can't know which user this is
-    without state. For simplicity, exchange tokens for the last user who
-    initiated connect (or store pending code with TTL).
-    We return a simple HTML page telling user to go back to the app.
-    """
     import httpx, time
     from fastapi.responses import HTMLResponse
+
+    print(f"[Strava] Callback received, code={code[:8]}...")
 
     # Find user with pending strava credentials (has client_id but no access_token yet)
     user = db.query(UserDB).filter(
         UserDB.strava_client_id.isnot(None),
         UserDB.strava_access_token.is_(None),
     ).order_by(UserDB.created_at.desc()).first()
+
+    print(f"[Strava] Found pending user: {user.email if user else None}")
 
     if not user or not user.strava_client_secret:
         return HTMLResponse("<h2>Ошибка: не найден пользователь с Strava Client ID. Попробуйте снова.</h2>")
@@ -1748,8 +1748,10 @@ def strava_callback(
                 "code":          code,
                 "grant_type":    "authorization_code",
             })
+        print(f"[Strava] Token exchange status: {resp.status_code}")
         if resp.status_code != 200:
-            return HTMLResponse(f"<h2>Ошибка Strava: {resp.text[:200]}</h2>")
+            print(f"[Strava] Token error: {resp.text}")
+            return HTMLResponse(f"<h2>Ошибка Strava: {resp.text[:300]}</h2>")
 
         tok = resp.json()
         user.strava_access_token  = tok.get("access_token")
@@ -1757,13 +1759,15 @@ def strava_callback(
         user.strava_token_expiry  = tok.get("expires_at", int(time.time()) + 21600)
         user.strava_athlete_id    = str(tok.get("athlete", {}).get("id", ""))
         db.commit()
+        print(f"[Strava] Connected! athlete_id={user.strava_athlete_id}")
     except Exception as e:
+        print(f"[Strava] Exception: {e}")
         return HTMLResponse(f"<h2>Ошибка: {e}</h2>")
 
     return HTMLResponse("""
         <html><body style="font-family:sans-serif;text-align:center;padding:60px">
         <h2>✅ Strava подключена!</h2>
-        <p>Вернитесь в приложение PeMa и нажмите «Синхронизировать».</p>
+        <p>Вернитесь в приложение PeMa — статус обновится автоматически.</p>
         </body></html>
     """)
 
@@ -1878,8 +1882,21 @@ def strava_sync(
             except Exception:
                 pass
 
+        # Determine athlete_id: use own profile or first linked athlete
+        target_athlete_id = current_user.athlete_id
+        if not target_athlete_id:
+            link = db.query(CoachAthleteLinkDB).filter(
+                CoachAthleteLinkDB.coach_user_id == current_user.id
+            ).first()
+            if link:
+                target_athlete_id = link.athlete_id
+
+        if not target_athlete_id:
+            continue  # no athlete to attach to — skip
+
         w = WorkoutDB(
             id=new_id(),
+            athlete_id=target_athlete_id,
             title=act.get("name") or f"Strava · {cat}",
             category=cat,
             distance_km=dist_km,
@@ -1887,7 +1904,7 @@ def strava_sync(
             intensity="moderate",
             status="done",
             date=start_date,
-            notes=f"Импортировано из Strava",
+            notes="Импортировано из Strava",
             source_file=strava_id,
             actual_distance_km=dist_km,
             actual_duration_min=dur_min,
@@ -1897,9 +1914,6 @@ def strava_sync(
             actual_elevation_gain=elev,
             route_geojson=route_geojson,
         )
-        # Assign to current user's athlete
-        if current_user.athlete_id:
-            w.athlete_id = current_user.athlete_id
         db.add(w)
         created += 1
 
@@ -1934,9 +1948,62 @@ def _decode_polyline(polyline_str: str) -> list:
 
 import re as _re
 
-AI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-AI_BASE    = "https://generativelanguage.googleapis.com/v1beta/openai"
-AI_MODEL   = "gemini-2.0-flash"
+AI_API_KEY = os.getenv("CEREBRAS_API_KEY", "")
+AI_BASE    = "https://api.cerebras.ai/v1"
+AI_MODEL   = "llama3.1-8b"
+
+def _ai_execute_action(action: dict, athlete_id: str, db: Session) -> str:
+    """Execute a structured action from AI JSON response."""
+    atype = action.get("type", "")
+
+    if atype == "create":
+        w = WorkoutDB(
+            id=new_id(),
+            athlete_id=athlete_id,
+            date=action.get("date", Date.today().strftime("%Y-%m-%d")),
+            title=action.get("title", "Тренировка"),
+            category=action.get("category", "run"),
+            distance_km=float(action.get("distance_km") or 0),
+            duration_min=int(action.get("duration_min") or 0),
+            intensity=action.get("intensity", "moderate"),
+            notes=action.get("notes", ""),
+            status="planned",
+        )
+        db.add(w)
+        db.commit()
+        return f"Создана: «{w.title}» на {w.date}"
+
+    elif atype == "update":
+        wid = action.get("workout_id", "")
+        w = db.query(WorkoutDB).filter(
+            WorkoutDB.id == wid,
+            WorkoutDB.athlete_id == athlete_id,
+        ).first()
+        if not w:
+            return f"Не найдена тренировка {wid}"
+        if "title"        in action: w.title       = action["title"]
+        if "date"         in action: w.date         = action["date"]
+        if "distance_km"  in action: w.distance_km  = float(action["distance_km"])
+        if "duration_min" in action: w.duration_min = int(action["duration_min"])
+        if "intensity"    in action: w.intensity    = action["intensity"]
+        if "notes"        in action: w.notes        = action["notes"]
+        db.commit()
+        return f"Обновлена: «{w.title}»"
+
+    elif atype == "delete":
+        wid = action.get("workout_id", "")
+        w = db.query(WorkoutDB).filter(
+            WorkoutDB.id == wid,
+            WorkoutDB.athlete_id == athlete_id,
+        ).first()
+        if not w:
+            return f"Не найдена тренировка {wid}"
+        title = w.title
+        db.delete(w)
+        db.commit()
+        return f"Удалена: «{title}»"
+
+    return f"Неизвестное действие: {atype}"
 
 
 def _build_ai_context(athlete_id: str, db: Session) -> dict:
@@ -1960,6 +2027,26 @@ def _build_ai_context(athlete_id: str, db: Session) -> dict:
             "status":       w.status,
         }
         for w in recent
+    ]
+
+    # Upcoming planned workouts (next 21 days) — with IDs so AI can edit them
+    upcoming = db.query(WorkoutDB).filter(
+        WorkoutDB.athlete_id == athlete_id,
+        WorkoutDB.date >= today.strftime("%Y-%m-%d"),
+        WorkoutDB.status == "planned",
+    ).order_by(WorkoutDB.date).limit(20).all()
+
+    upcoming_list = [
+        {
+            "id":           w.id,
+            "date":         w.date,
+            "title":        w.title,
+            "category":     w.category,
+            "distance_km":  w.distance_km,
+            "duration_min": w.duration_min,
+            "intensity":    w.intensity,
+        }
+        for w in upcoming
     ]
 
     # Active goals
@@ -2008,14 +2095,16 @@ def _build_ai_context(athlete_id: str, db: Session) -> dict:
     dist30 = round(sum(_effective_distance(w) for w in done30), 1)
     dur30  = sum(_effective_duration(w) for w in done30)
 
-    # Athlete name (stored directly in AthleteDB)
+    # Athlete name
     athlete = db.query(AthleteDB).filter(AthleteDB.id == athlete_id).first()
 
     return {
-        "name":            athlete.name if athlete else "Атлет",
-        "goals":           goals_list,
-        "pain_points":     pain_human,
-        "recent_workouts": recent_list,
+        "name":              athlete.name if athlete else "Атлет",
+        "today":             today.strftime("%Y-%m-%d"),
+        "goals":             goals_list,
+        "pain_points":       pain_human,
+        "recent_workouts":   recent_list,
+        "upcoming_workouts": upcoming_list,
         "stats": {
             "workoutsCount": len(done30),
             "distanceTotal": dist30,
@@ -2040,18 +2129,34 @@ def _build_system_prompt(ctx: dict) -> str:
         for w in ctx.get("recent_workouts", [])[:7]
     ]) or "  Нет данных"
 
+    upcoming = ctx.get("upcoming_workouts", [])
+    upcoming_str = "\n".join([
+        f"  - [id:{w['id']}] {w['date']}: {w['title']} ({w['category']},"
+        f" {w['distance_km']} км, {w['duration_min']} мин, {w['intensity']})"
+        for w in upcoming
+    ]) or "  Запланированных тренировок нет"
+
     stats = ctx.get("stats", {})
+    today = ctx.get("today", "")
     return (
-        f"Ты персональный AI тренер в приложении PeMa. Помогаешь атлету улучшать результаты.\n\n"
-        f"ВАЖНО: Отвечай ТОЛЬКО на вопросы о тренировках, спорте, восстановлении, "
-        f"спортивном питании и здоровье атлета. На другие темы вежливо откажись.\n\n"
-        f"Профиль атлета: {ctx.get('name', 'Атлет')}\n\n"
-        f"Активные цели:\n{goals_str}\n\n"
-        f"Болевые точки и травмы: {injuries_str}\n\n"
-        f"Последние тренировки:\n{recent_str}\n\n"
-        f"Статистика за 30 дней: {stats.get('workoutsCount', 0)} тренировок, "
+        f"Ты персональный AI тренер в приложении PeMa. Помогаешь атлету планировать тренировки.\n"
+        f"Сегодня: {today}\n\n"
+        f"ВАЖНО: Отвечай ТОЛЬКО на вопросы о тренировках, спорте, восстановлении и питании.\n"
+        f"На другие темы вежливо откажись.\n\n"
+        f"Профиль атлета: {ctx.get('name', 'Атлет')}\n"
+        f"Активные цели:\n{goals_str}\n"
+        f"Болевые точки: {injuries_str}\n"
+        f"Последние тренировки:\n{recent_str}\n"
+        f"Предстоящие тренировки (используй workout_id для изменений):\n{upcoming_str}\n"
+        f"Статистика 30 дней: {stats.get('workoutsCount', 0)} тренировок, "
         f"{stats.get('distanceTotal', 0)} км, {stats.get('durationTotal', 0)} мин.\n\n"
-        f"Правила: будь конкретным и кратким. Отвечай на русском языке. Не превышай 400 слов."
+        f"ФОРМАТ ОТВЕТА — строго JSON без markdown:\n"
+        f'{{"message": "текст ответа атлету на русском", "actions": []}}\n\n'
+        f"Поле actions заполняй ТОЛЬКО когда нужно изменить план:\n"
+        f'  Создать: {{"type":"create","date":"YYYY-MM-DD","title":"...","category":"run|bike|swim","distance_km":0,"duration_min":0,"intensity":"easy|moderate|hard","notes":"..."}}\n'
+        f'  Изменить: {{"type":"update","workout_id":"...","title":"...","distance_km":0,...}}\n'
+        f'  Удалить: {{"type":"delete","workout_id":"..."}}\n'
+        f"Иначе actions = []. Не превышай 250 слов в message."
     )
 
 
@@ -2076,19 +2181,19 @@ async def ai_chat(
     db: Session = Depends(get_db),
 ):
     if not AI_API_KEY:
-        raise HTTPException(503, "GEMINI_API_KEY не задан на сервере")
+        raise HTTPException(503, "CEREBRAS_API_KEY не задан на сервере")
 
     _assert_athlete_access(current_user, data.athlete_id, db)
 
     ctx           = _build_ai_context(data.athlete_id, db)
     system_prompt = _build_system_prompt(ctx)
 
-    messages = [{"role": "system", "content": system_prompt}] + [
+    loop_messages = [{"role": "system", "content": system_prompt}] + [
         {"role": m.role, "content": m.content} for m in data.messages
     ]
 
     import httpx
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    async with httpx.AsyncClient(timeout=45.0) as client:
         resp = await client.post(
             f"{AI_BASE}/chat/completions",
             headers={
@@ -2096,15 +2201,46 @@ async def ai_chat(
                 "Content-Type":  "application/json",
             },
             json={
-                "model":      AI_MODEL,
-                "messages":   messages,
-                "max_tokens": 600,
+                "model":           AI_MODEL,
+                "messages":        loop_messages,
+                "response_format": {"type": "json_object"},
+                "max_tokens":      900,
             },
         )
 
     if resp.status_code != 200:
-        raise HTTPException(502, f"AI ошибка {resp.status_code}: {resp.text[:200]}")
+        err = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+        err_msg = err.get("error", {}).get("message", "") or resp.text[:200]
+        print(f"[AI] ERROR {resp.status_code}: {err_msg}")
+        # Return friendly Russian error instead of raw JSON
+        if resp.status_code == 429:
+            friendly = "Слишком много запросов — сервер AI перегружен. Подождите минуту и попробуйте снова."
+        elif resp.status_code >= 500:
+            friendly = "Сервер AI временно недоступен. Попробуйте через несколько минут."
+        elif resp.status_code == 401:
+            friendly = "Ошибка авторизации AI. Обратитесь к администратору."
+        else:
+            friendly = f"Ошибка AI ({resp.status_code}). Попробуйте позже."
+        raise HTTPException(502, friendly)
 
-    content = resp.json()["choices"][0]["message"]["content"]
-    return {"reply": content}
+    raw_content = resp.json()["choices"][0]["message"]["content"] or ""
+
+    # Parse structured JSON from AI
+    changes_made = False
+    message = raw_content  # fallback: show raw if not JSON
+
+    try:
+        parsed = json.loads(raw_content)
+        message = parsed.get("message", raw_content)
+        actions = parsed.get("actions") or []
+        for action in actions:
+            result = _ai_execute_action(action, data.athlete_id, db)
+            print(f"[AI] Action {action.get('type')}: {result}")
+            changes_made = True
+    except Exception as e:
+        print(f"[AI] JSON parse error: {e}, raw: {raw_content[:200]}")
+        # AI returned plain text instead of JSON — use it as-is
+        message = raw_content
+
+    return {"reply": message, "changes_made": changes_made}
 

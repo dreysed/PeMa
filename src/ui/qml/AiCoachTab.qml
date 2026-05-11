@@ -74,7 +74,7 @@ Item {
                                 color: root.textPrimary
                             }
                             Label {
-                                text: "На базе Gemini 2.0 · Google"
+                                text: "На базе Llama 3.3 · Cerebras"
                                 font.pixelSize: 11
                                 color: root.textMuted
                             }
@@ -332,7 +332,8 @@ Item {
                                 delegate: Item {
                                     width: chatCol.width - 40
                                     height: bubble.implicitHeight + 8
-                                    property bool isUser: modelData.role === "user"
+                                    property bool isUser:  modelData.role === "user"
+                                    property bool isError: modelData.role === "error"
 
                                     Rectangle {
                                         id: bubble
@@ -342,9 +343,11 @@ Item {
                                         implicitWidth: bubbleText.implicitWidth + 24
                                         implicitHeight: bubbleText.implicitHeight + 18
                                         radius: 12
-                                        color: isUser ? root.accent : root.surface
+                                        color: isError ? "#2d1515"
+                                             : isUser  ? root.accent
+                                             :            root.surface
                                         border.width: isUser ? 0 : 1
-                                        border.color: root.borderCol
+                                        border.color: isError ? "#5a2020" : root.borderCol
 
                                         Label {
                                             id: bubbleText
@@ -352,9 +355,11 @@ Item {
                                             anchors.right: parent.right
                                             anchors.top: parent.top
                                             anchors.margins: 12
-                                            text: modelData.content || ""
+                                            text: (isError ? "⚠️ " : "") + (modelData.content || "")
                                             font.pixelSize: 13
-                                            color: isUser ? "#ffffff" : root.textPrimary
+                                            color: isError ? "#fca5a5"
+                                                 : isUser  ? "#ffffff"
+                                                 :            root.textPrimary
                                             wrapMode: Text.Wrap
                                             lineHeight: 1.45
                                         }

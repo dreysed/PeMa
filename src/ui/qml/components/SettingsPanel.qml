@@ -188,7 +188,8 @@ Item {
                                 font.pixelSize: 11; color: panel.textMuted; wrapMode: Text.Wrap
                             }
 
-                            Row {
+                            Flow {
+                                width: parent.width
                                 spacing: 8
 
                                 // Connect / Disconnect button

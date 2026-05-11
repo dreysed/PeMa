@@ -1917,7 +1917,7 @@ ApplicationWindow {
         onLogoutRequested: { settingsPanel.close(); workoutStore.logout() }
         onStravaConnectRequested: {
             if (!workoutStore.stravaHasClientId) { settingsPanel.close(); stravaSettingsDlg.open() }
-            else workoutStore.connectStrava()
+            else { settingsPanel.close(); workoutStore.openStravaAuthUrl() }
         }
         onStravaDisconnectRequested: workoutStore.disconnectStrava()
         onStravaSyncRequested: workoutStore.syncStrava()
