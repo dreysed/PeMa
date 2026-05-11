@@ -310,7 +310,7 @@ Item {
         height: 24; width: editLbl.implicitWidth + 16; radius: 6
         color: tileMap.lineColor; z: 30
         Label { id: editLbl; anchors.centerIn: parent
-                text: "Рисую маршрут · " + tileMap.editWaypoints.length + " точек"
+                text: "✏ " + tileMap.editWaypoints.length + " точек  ·  клик — добавить  ·  клик по точке — удалить"
                 font.pixelSize: 10; font.weight: Font.DemiBold; color: "#fff" }
     }
 
@@ -331,31 +331,43 @@ Item {
         }
 
         onPositionChanged: function(e) {
-            if (!pressed || tileMap.editMode) return
+            if (!pressed) return
             var dx = e.x - tileMap._dragX
             var dy = e.y - tileMap._dragY
-            if (Math.abs(dx) > 2 || Math.abs(dy) > 2) _didDrag = true
-            // ← KEY: just translate the layer, zero tile rebuilds
+            // 5 px threshold — gives click actions room to breathe (especially on trackpad)
+            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) _didDrag = true
             tileMap._panOffX = dx
             tileMap._panOffY = dy
         }
 
         onReleased: function(e) {
             cursorShape = tileMap.editMode ? Qt.CrossCursor : Qt.OpenHandCursor
-            if (tileMap.editMode || !_didDrag) return
-            // Commit pan: update center (triggers tile rebuild once)
+            if (!_didDrag) return
+            // Commit pan — works in both view and edit mode so the user can
+            // navigate the map while drawing waypoints
             var dx = e.x - tileMap._dragX
             var dy = e.y - tileMap._dragY
             var sc = tileMap._scale()
             tileMap.centerLon = tileMap._dragLon - dx * 360 / sc
             tileMap.centerLat = tileMap._worldYToLat(tileMap._latToWorld(tileMap._dragLat) - dy)
-            // Reset visual offset — tiles will snap to new center
             tileMap._panOffX = 0
             tileMap._panOffY = 0
         }
 
         onClicked: function(e) {
             if (!tileMap.editMode || _didDrag) return
+            var wps = tileMap.editWaypoints
+            // Click within 16 px of an existing waypoint → delete that waypoint
+            for (var i = 0; i < wps.length; i++) {
+                var sp = tileMap.latLonToScreen(wps[i].lat, wps[i].lon)
+                var ddx = e.x - sp.x; var ddy = e.y - sp.y
+                if (ddx * ddx + ddy * ddy <= 16 * 16) {
+                    var nw = wps.slice(); nw.splice(i, 1)
+                    tileMap.editWaypoints = nw
+                    return
+                }
+            }
+            // Otherwise add a new waypoint at the clicked position
             var ll = tileMap.screenToLatLon(e.x, e.y)
             tileMap.addWaypoint(ll.lat, ll.lon)
         }

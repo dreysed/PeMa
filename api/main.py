@@ -1498,8 +1498,10 @@ def generate_route(
     target_km = data.distance_km
 
     # ── Step 1: Generate circular waypoints (randomised each call) ──────────────
-    # Use 4–7 vertices so each generation has a different polygon shape
-    n_points = random.randint(4, 7)
+    # 3 intermediate points (triangle loop) — fewer constraints let OSRM find
+    # a cleaner path without tight detours or dead-end alleys.
+    # Vary the count between 3 and 4 for some shape variety.
+    n_points = random.randint(3, 4)
     radius_km = target_km / (2 * math.pi)
 
     dlat = radius_km / 111.0
@@ -1547,7 +1549,7 @@ def generate_route(
         with httpx.Client(timeout=15) as client:
             osrm_resp = client.get(
                 f"http://router.project-osrm.org/route/v1/foot/{coords_str}"
-                f"?overview=full&geometries=geojson"
+                f"?overview=full&geometries=geojson&continue_straight=false"
             )
         if osrm_resp.status_code == 200:
             osrm_data = osrm_resp.json()
@@ -1609,7 +1611,7 @@ def route_from_waypoints(
         with httpx.Client(timeout=15) as client:
             resp = client.get(
                 f"http://router.project-osrm.org/route/v1/foot/{coords_str}"
-                f"?overview=full&geometries=geojson"
+                f"?overview=full&geometries=geojson&continue_straight=false"
             )
         if resp.status_code == 200:
             rdata = resp.json().get("routes", [])

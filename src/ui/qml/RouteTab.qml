@@ -64,6 +64,33 @@ Item {
     onDefaultLatChanged: genLat = defaultLat
     onDefaultLonChanged: genLon = defaultLon
 
+    // ── GPX clipboard export ──────────────────────────────────────────────────
+    // QML has no direct file-write API, so we copy GPX text to clipboard
+    // via the well-known hidden TextEdit trick.
+    TextEdit { id: clipHelper; visible: false; focus: false }
+    Timer    { id: gpxToast;   interval: 2000 }   // brief "Скопировано!" feedback
+
+    function copyRouteAsGpx() {
+        if (!routeTab.selectedRoute || !routeTab.selectedRoute.geojson) return
+        try {
+            var geo    = JSON.parse(routeTab.selectedRoute.geojson)
+            var coords = geo.coordinates || []
+            var name   = (routeTab.selectedRoute.name || "Маршрут")
+                             .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+            var lines  = ['<?xml version="1.0" encoding="UTF-8"?>',
+                          '<gpx version="1.1" creator="SportCal" xmlns="http://www.topografix.com/GPX/1/1">',
+                          '  <trk>', '    <name>' + name + '</name>', '    <trkseg>']
+            for (var i = 0; i < coords.length; i++)
+                lines.push('      <trkpt lat="' + coords[i][1].toFixed(6)
+                            + '" lon="' + coords[i][0].toFixed(6) + '"><ele>0</ele></trkpt>')
+            lines.push('    </trkseg>', '  </trk>', '</gpx>')
+            clipHelper.text = lines.join('\n')
+            clipHelper.selectAll()
+            clipHelper.copy()
+            gpxToast.restart()
+        } catch(e) {}
+    }
+
     // ── City geocoding ────────────────────────────────────────────────────────
     function searchCity(query) {
         if (!query || query.trim() === "") return
@@ -314,18 +341,15 @@ Item {
                                     onTextChanged: routeTab.genPrefs = text
                                 }
 
-                                // Generate button
+                                // Generate button — single Label anchored to centre (no layout shift)
                                 Rectangle {
                                     Layout.fillWidth: true; height: 34; radius: 8
                                     color: routeTab.isBusy ? borderCol : accent
                                     opacity: routeTab.isBusy ? 0.7 : 1.0
-                                    RowLayout {
-                                        anchors.centerIn: parent; spacing: 6
-                                        BusyIndicator { width: 16; height: 16; visible: routeTab.isBusy; running: routeTab.isBusy }
-                                        Label {
-                                            text: routeTab.isBusy ? "Строю маршрут..." : "Сгенерировать"
-                                            font.pixelSize: 12; font.weight: Font.DemiBold; color: "#fff"
-                                        }
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: routeTab.isBusy ? "Строю маршрут…" : "Сгенерировать"
+                                        font.pixelSize: 12; font.weight: Font.DemiBold; color: "#fff"
                                     }
                                     MouseArea {
                                         anchors.fill: parent; enabled: !routeTab.isBusy; cursorShape: Qt.PointingHandCursor
@@ -444,6 +468,21 @@ Item {
                             font.pixelSize: 11; color: textMuted; elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
+                    }
+
+                    // Copy route as GPX to clipboard
+                    Rectangle {
+                        height: 30; width: gpxLbl.implicitWidth + 16; radius: 7
+                        color: gpxToast.running ? routeTab.runColor : routeTab.surface2
+                        border.width: 1; border.color: gpxToast.running ? routeTab.runColor : routeTab.borderCol
+                        Label {
+                            id: gpxLbl; anchors.centerIn: parent
+                            text: gpxToast.running ? "Скопировано!" : "Скопировать GPX"
+                            font.pixelSize: 11
+                            color: gpxToast.running ? "#fff" : routeTab.accent
+                        }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: routeTab.copyRouteAsGpx() }
                     }
 
                     // Edit existing route — sample GeoJSON into edit waypoints
