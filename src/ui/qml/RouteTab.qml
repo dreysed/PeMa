@@ -61,8 +61,38 @@ Item {
     property real   genDist:  5.0
     property string genPrefs: ""
 
-    onDefaultLatChanged: if (genLat === 55.7558) genLat = defaultLat
-    onDefaultLonChanged: if (genLon === 37.6173) genLon = defaultLon
+    onDefaultLatChanged: genLat = defaultLat
+    onDefaultLonChanged: genLon = defaultLon
+
+    // ── City geocoding ────────────────────────────────────────────────────────
+    function searchCity(query) {
+        if (!query || query.trim() === "") return
+        var q = query.trim()
+        var xhr = new XMLHttpRequest()
+        xhr.open("GET", "https://nominatim.openstreetmap.org/search?q="
+                 + encodeURIComponent(q) + "&format=json&limit=1")
+        xhr.setRequestHeader("User-Agent", "SportCalApp/1.0")
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState === 4) {
+                if (xhr.status === 200) {
+                    try {
+                        var results = JSON.parse(xhr.responseText)
+                        if (results.length > 0) {
+                            var r = results[0]
+                            routeTab.genLat = parseFloat(r.lat)
+                            routeTab.genLon = parseFloat(r.lon)
+                            cityStatusLabel.text = r.display_name.split(",").slice(0, 2).join(",")
+                        } else {
+                            cityStatusLabel.text = "Город не найден"
+                        }
+                    } catch(e) { cityStatusLabel.text = "Ошибка разбора ответа" }
+                } else {
+                    cityStatusLabel.text = "Ошибка поиска (" + xhr.status + ")"
+                }
+            }
+        }
+        xhr.send()
+    }
 
     // ── Route coords from selected route GeoJSON ──────────────────────────────
     property var routeCoords: []
@@ -221,28 +251,40 @@ Item {
                                 anchors { fill: parent; margins: 12 }
                                 spacing: 10
 
-                                // Lat/Lon
-                                RowLayout {
-                                    Layout.fillWidth: true; spacing: 6
-                                    ColumnLayout {
-                                        Layout.fillWidth: true; spacing: 2
-                                        Label { text: "Широта"; font.pixelSize: 10; color: textMuted }
+                                // City search
+                                ColumnLayout {
+                                    Layout.fillWidth: true; spacing: 4
+                                    Label { text: "Город старта"; font.pixelSize: 10; color: textMuted }
+                                    RowLayout {
+                                        Layout.fillWidth: true; spacing: 6
                                         TextField {
+                                            id: cityField
                                             Layout.fillWidth: true; implicitHeight: 32; font.pixelSize: 12
-                                            text: routeTab.genLat.toFixed(4)
-                                            inputMethodHints: Qt.ImhFormattedNumbersOnly
-                                            onEditingFinished: { var v = parseFloat(text); if (!isNaN(v)) routeTab.genLat = v }
+                                            placeholderText: "Москва, Казань, Сочи..."
+                                            onAccepted: {
+                                                cityStatusLabel.text = "Ищу…"
+                                                routeTab.searchCity(cityField.text)
+                                            }
+                                        }
+                                        Rectangle {
+                                            width: 32; height: 32; radius: 8; color: accent
+                                            Label { anchors.centerIn: parent; text: "→"; font.pixelSize: 15; color: "#fff"; font.weight: Font.DemiBold }
+                                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                onClicked: {
+                                                    cityStatusLabel.text = "Ищу…"
+                                                    routeTab.searchCity(cityField.text)
+                                                }
+                                            }
                                         }
                                     }
-                                    ColumnLayout {
-                                        Layout.fillWidth: true; spacing: 2
-                                        Label { text: "Долгота"; font.pixelSize: 10; color: textMuted }
-                                        TextField {
-                                            Layout.fillWidth: true; implicitHeight: 32; font.pixelSize: 12
-                                            text: routeTab.genLon.toFixed(4)
-                                            inputMethodHints: Qt.ImhFormattedNumbersOnly
-                                            onEditingFinished: { var v = parseFloat(text); if (!isNaN(v)) routeTab.genLon = v }
-                                        }
+                                    Label {
+                                        id: cityStatusLabel
+                                        Layout.fillWidth: true
+                                        text: ""
+                                        visible: text !== ""
+                                        font.pixelSize: 10; color: textMuted; wrapMode: Text.Wrap
+                                        elide: Text.ElideRight
+                                        maximumLineCount: 1
                                     }
                                 }
 
@@ -369,11 +411,11 @@ Item {
                 lineColor:   routeTab.accent
                 routeCoords: routeTab.routeCoords
                 centerLat:   routeTab.selectedRoute
-                             ? (routeTab.selectedRoute.startLat || routeTab.defaultLat)
-                             : routeTab.defaultLat
+                             ? (routeTab.selectedRoute.startLat || routeTab.genLat)
+                             : routeTab.genLat
                 centerLon:   routeTab.selectedRoute
-                             ? (routeTab.selectedRoute.startLon || routeTab.defaultLon)
-                             : routeTab.defaultLon
+                             ? (routeTab.selectedRoute.startLon || routeTab.genLon)
+                             : routeTab.genLon
             }
 
             // ── Route info overlay (shown when route selected) ────────────────
@@ -408,7 +450,7 @@ Item {
                     Rectangle {
                         height: 30; width: osmLbl.implicitWidth + 16; radius: 7
                         color: surface2; border.width: 1; border.color: borderCol
-                        Label { id: osmLbl; anchors.centerIn: parent; text: "Открыть на OSM"; font.pixelSize: 11; color: accent }
+                        Label { id: osmLbl; anchors.centerIn: parent; text: "В браузере"; font.pixelSize: 11; color: accent }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                             onClicked: {
                                 if (routeTab.selectedRoute) {

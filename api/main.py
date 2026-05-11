@@ -1475,26 +1475,30 @@ def generate_route(
     Generate a circular running route using geometric waypoints + OSRM road snapping.
     No AI or paid API required — completely free.
     """
-    import math, httpx
+    import math, random, httpx
 
     lat = data.start_lat
     lon = data.start_lon
     target_km = data.distance_km
 
-    # ── Step 1: Generate circular waypoints ────────────────────────────────────
-    # radius so that a loop through N points ≈ target_km
-    n_points = 5  # pentagon gives a natural variety
+    # ── Step 1: Generate circular waypoints (randomised each call) ──────────────
+    # Use 4–7 vertices so each generation has a different polygon shape
+    n_points = random.randint(4, 7)
     radius_km = target_km / (2 * math.pi)
 
     dlat = radius_km / 111.0
     dlon = radius_km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
 
-    # Start going roughly north, then clockwise
+    # Random starting angle → route points in a different direction every time
+    start_angle = random.uniform(0, 2 * math.pi)
+
     waypoints: list = [[lon, lat]]
     for i in range(1, n_points + 1):
-        angle = -math.pi / 2 + 2 * math.pi * i / n_points
-        wlat = lat + dlat * math.sin(angle)
-        wlon = lon + dlon * math.cos(angle)
+        base_angle = start_angle + 2 * math.pi * i / n_points
+        # Perturb each vertex's radius ±25% for organic-looking variation
+        perturb = random.uniform(0.75, 1.25)
+        wlat = lat + dlat * perturb * math.sin(base_angle)
+        wlon = lon + dlon * perturb * math.cos(base_angle)
         waypoints.append([wlon, wlat])
     waypoints.append([lon, lat])   # close the loop
 
