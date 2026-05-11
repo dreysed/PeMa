@@ -24,7 +24,9 @@ Item {
     property bool   aiTyping:     store ? store.aiTyping     : false
     property var    aiModels:     store ? store.aiModels      : []
     property string aiModel:      store ? store.aiModel       : ""
-    property bool   aiAvailable:  store ? store.aiAvailable   : false
+    property bool   aiAvailable:     store ? store.aiAvailable     : false
+    property bool   ollamaInstalled: store ? store.ollamaInstalled : false
+    property bool   ollamaStarting:  store ? store.ollamaStarting  : false
     property var    goals:        store ? store.goals          : []
     property var    analytics:    store ? store.analyticsSummary : ({})
     property string athleteName:  store ? store.selectedAthleteName : ""
@@ -109,14 +111,14 @@ Item {
 
                         Rectangle {
                             width: parent.width
-                            height: ollamaRow.implicitHeight + 20
+                            height: ollamaCol.implicitHeight + 20
                             radius: 10
                             color: root.surface2
                             border.width: 1
                             border.color: root.borderCol
 
-                            ColumnLayout {
-                                id: ollamaRow
+                            Column {
+                                id: ollamaCol
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.top: parent.top
@@ -125,24 +127,44 @@ Item {
 
                                 // Status row
                                 RowLayout {
-                                    Layout.fillWidth: true
+                                    width: parent.width
                                     spacing: 8
+
+                                    // Pulsing dot
                                     Rectangle {
                                         width: 8; height: 8; radius: 4
-                                        color: root.aiAvailable ? root.runColor : "#f59e0b"
+                                        color: root.aiAvailable ? root.runColor
+                                             : root.ollamaStarting ? "#f59e0b"
+                                             : root.borderCol
+
+                                        SequentialAnimation on opacity {
+                                            running: root.ollamaStarting
+                                            loops: Animation.Infinite
+                                            NumberAnimation { to: 0.3; duration: 500 }
+                                            NumberAnimation { to: 1.0; duration: 500 }
+                                        }
                                     }
+
                                     Label {
-                                        text: root.aiAvailable ? "Ollama запущена" : "Ollama не найдена"
+                                        text: root.aiAvailable    ? "Ollama запущена"
+                                            : root.ollamaStarting ? "Запускаем Ollama…"
+                                            : root.ollamaInstalled ? "Ollama не запущена"
+                                            : "Ollama не установлена"
                                         font.pixelSize: 12
                                         font.weight: Font.DemiBold
-                                        color: root.aiAvailable ? root.runColor : "#f59e0b"
+                                        color: root.aiAvailable    ? root.runColor
+                                             : root.ollamaStarting ? "#f59e0b"
+                                             : root.textMuted
                                         Layout.fillWidth: true
                                     }
+
+                                    // Refresh button
                                     Rectangle {
                                         width: 28; height: 28; radius: 7
                                         color: "transparent"
                                         border.width: 1
                                         border.color: root.borderCol
+                                        visible: !root.ollamaStarting
                                         Label {
                                             anchors.centerIn: parent
                                             text: "↺"
@@ -152,14 +174,14 @@ Item {
                                         MouseArea {
                                             anchors.fill: parent
                                             cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.store && root.store.refreshAiModels()
+                                            onClicked: root.store && root.store.startOllama()
                                         }
                                     }
                                 }
 
-                                // Model selector
-                                ColumnLayout {
-                                    Layout.fillWidth: true
+                                // Model selector — only when running
+                                Column {
+                                    width: parent.width
                                     spacing: 4
                                     visible: root.aiAvailable && root.aiModels.length > 0
 
@@ -171,7 +193,7 @@ Item {
 
                                     ComboBox {
                                         id: modelCombo
-                                        Layout.fillWidth: true
+                                        width: parent.width
                                         model: root.aiModels
                                         implicitHeight: 32
                                         currentIndex: {
@@ -196,15 +218,36 @@ Item {
                                     }
                                 }
 
-                                // Not available hint
+                                // "Install Ollama" button — when not installed
+                                Rectangle {
+                                    width: parent.width
+                                    height: 34
+                                    radius: 8
+                                    color: root.accent
+                                    visible: !root.ollamaInstalled && !root.ollamaStarting
+
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "Установить Ollama"
+                                        font.pixelSize: 12
+                                        font.weight: Font.DemiBold
+                                        color: "#ffffff"
+                                    }
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.store && root.store.openOllamaInstallPage()
+                                    }
+                                }
+
+                                // Hint: no models yet
                                 Label {
-                                    visible: !root.aiAvailable
-                                    Layout.fillWidth: true
-                                    text: "Запустите Ollama:\n  ollama serve\nи загрузите модель:\n  ollama pull llama3"
+                                    width: parent.width
+                                    visible: root.aiAvailable && root.aiModels.length === 0
+                                    text: "Нет загруженных моделей.\nВ терминале: ollama pull llama3.2"
                                     font.pixelSize: 10
                                     color: root.textMuted
                                     wrapMode: Text.Wrap
-                                    font.family: "Menlo, Monaco, monospace"
                                 }
                             }
                         }
@@ -662,8 +705,14 @@ Item {
         msgField.text = ""
     }
 
-    // Load models when tab is shown
+    // Auto-start Ollama when tab is first shown
     Component.onCompleted: {
-        if (root.store) root.store.refreshAiModels()
+        if (root.store) root.store.startOllama()
+    }
+
+    // Re-check when tab becomes visible again
+    onVisibleChanged: {
+        if (visible && root.store && !root.aiAvailable && !root.ollamaStarting)
+            root.store.startOllama()
     }
 }

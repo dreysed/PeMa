@@ -1,6 +1,7 @@
 #include "backend/WorkoutStore.h"
 
 #include <QDateTime>
+#include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
@@ -31,6 +32,14 @@ WorkoutStore::WorkoutStore(QObject *parent)
         }
         // No session → QML will show the AuthScreen automatically
     });
+}
+
+WorkoutStore::~WorkoutStore()
+{
+    if (m_ollamaProcess && m_ollamaProcess->state() != QProcess::NotRunning) {
+        m_ollamaProcess->terminate();
+        m_ollamaProcess->waitForFinished(3000);
+    }
 }
 
 // ─── Session persistence ──────────────────────────────────────────────────────
@@ -1294,9 +1303,17 @@ void WorkoutStore::setBusy(bool value)
 void WorkoutStore::refreshAiModels()
 {
     httpAsync(QStringLiteral("/api/ai/models"), [this](const QJsonDocument &doc) {
+        // Finish "starting" state regardless of result
+        if (m_ollamaStarting) {
+            m_ollamaStarting = false;
+            emit ollamaStateChanged();
+        }
+
         if (!doc.isObject()) {
-            m_aiAvailable = false;
-            emit aiAvailableChanged();
+            if (m_aiAvailable) {
+                m_aiAvailable = false;
+                emit aiAvailableChanged();
+            }
             return;
         }
         const QJsonObject obj = doc.object();
@@ -1313,6 +1330,59 @@ void WorkoutStore::refreshAiModels()
             m_aiModel = m_aiModels.first();
         emit aiModelsChanged();
     });
+}
+
+static QString findOllamaBinary()
+{
+    const QStringList candidates = {
+        QStringLiteral("/usr/local/bin/ollama"),
+        QStringLiteral("/opt/homebrew/bin/ollama"),
+        QDir::homePath() + QStringLiteral("/.local/bin/ollama"),
+        QStringLiteral("/usr/bin/ollama")
+    };
+    for (const auto &p : candidates)
+        if (QFile::exists(p)) return p;
+    return {};
+}
+
+void WorkoutStore::startOllama()
+{
+    if (m_ollamaStarting) return;
+
+    const QString binary = findOllamaBinary();
+    const bool installed = !binary.isEmpty();
+
+    if (installed != m_ollamaInstalled) {
+        m_ollamaInstalled = installed;
+        emit ollamaStateChanged();
+    }
+
+    if (!installed) return;   // UI will show "Install" button
+    if (m_aiAvailable)  return;   // already running — just refresh models
+
+    // Kill any previous process we spawned
+    if (m_ollamaProcess && m_ollamaProcess->state() != QProcess::NotRunning) {
+        m_ollamaProcess->terminate();
+        m_ollamaProcess->waitForFinished(2000);
+    }
+
+    m_ollamaStarting = true;
+    emit ollamaStateChanged();
+
+    m_ollamaProcess = new QProcess(this);
+    m_ollamaProcess->setProgram(binary);
+    m_ollamaProcess->setArguments({QStringLiteral("serve")});
+    m_ollamaProcess->start();
+
+    // Give Ollama ~2 s to bind its port, then check
+    QTimer::singleShot(2000, this, [this]() {
+        refreshAiModels();
+    });
+}
+
+void WorkoutStore::openOllamaInstallPage()
+{
+    QDesktopServices::openUrl(QUrl(QStringLiteral("https://ollama.com")));
 }
 
 void WorkoutStore::setAiModel(const QString &model)

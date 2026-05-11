@@ -11,10 +11,12 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QProcess>
 
 class WorkoutStore : public QObject
 {
     Q_OBJECT
+
 
     // ── Auth ──────────────────────────────────────────────────────────────────
     Q_PROPERTY(bool    isLoggedIn       READ isLoggedIn       NOTIFY loginStateChanged)
@@ -56,14 +58,17 @@ class WorkoutStore : public QObject
     Q_PROPERTY(bool         busy                   READ busy                   NOTIFY busyChanged)
 
     // ── AI Coach ──────────────────────────────────────────────────────────────
-    Q_PROPERTY(QVariantList chatHistory  READ chatHistory  NOTIFY chatHistoryChanged)
-    Q_PROPERTY(bool         aiTyping     READ aiTyping     NOTIFY aiTypingChanged)
-    Q_PROPERTY(QStringList  aiModels     READ aiModels     NOTIFY aiModelsChanged)
-    Q_PROPERTY(QString      aiModel      READ aiModel      WRITE setAiModel NOTIFY aiModelsChanged)
-    Q_PROPERTY(bool         aiAvailable  READ aiAvailable  NOTIFY aiAvailableChanged)
+    Q_PROPERTY(QVariantList chatHistory      READ chatHistory      NOTIFY chatHistoryChanged)
+    Q_PROPERTY(bool         aiTyping         READ aiTyping         NOTIFY aiTypingChanged)
+    Q_PROPERTY(QStringList  aiModels         READ aiModels         NOTIFY aiModelsChanged)
+    Q_PROPERTY(QString      aiModel          READ aiModel          WRITE setAiModel NOTIFY aiModelsChanged)
+    Q_PROPERTY(bool         aiAvailable      READ aiAvailable      NOTIFY aiAvailableChanged)
+    Q_PROPERTY(bool         ollamaInstalled  READ ollamaInstalled  NOTIFY ollamaStateChanged)
+    Q_PROPERTY(bool         ollamaStarting   READ ollamaStarting   NOTIFY ollamaStateChanged)
 
 public:
     explicit WorkoutStore(QObject *parent = nullptr);
+    ~WorkoutStore();
 
     // ── Auth getters ──────────────────────────────────────────────────────────
     bool    isLoggedIn()      const { return !m_token.isEmpty(); }
@@ -105,11 +110,13 @@ public:
     bool         busy()                const { return m_busy; }
 
     // ── AI Coach getters ──────────────────────────────────────────────────────
-    QVariantList chatHistory() const { return m_chatHistory; }
-    bool         aiTyping()    const { return m_aiTyping; }
-    QStringList  aiModels()    const { return m_aiModels; }
-    QString      aiModel()     const { return m_aiModel; }
-    bool         aiAvailable() const { return m_aiAvailable; }
+    QVariantList chatHistory()     const { return m_chatHistory; }
+    bool         aiTyping()        const { return m_aiTyping; }
+    QStringList  aiModels()        const { return m_aiModels; }
+    QString      aiModel()         const { return m_aiModel; }
+    bool         aiAvailable()     const { return m_aiAvailable; }
+    bool         ollamaInstalled() const { return m_ollamaInstalled; }
+    bool         ollamaStarting()  const { return m_ollamaStarting; }
     void         setAiModel(const QString &model);
 
     // ── Auth invokables ───────────────────────────────────────────────────────
@@ -204,6 +211,8 @@ public:
     Q_INVOKABLE void sendAiMessage(const QString &text);
     Q_INVOKABLE void clearAiChat();
     Q_INVOKABLE void refreshAiModels();
+    Q_INVOKABLE void startOllama();
+    Q_INVOKABLE void openOllamaInstallPage();
 
     // ── Strava ────────────────────────────────────────────────────────────────
     Q_INVOKABLE void saveStravaCredentials(const QString &clientId,
@@ -258,6 +267,7 @@ signals:
     void aiTypingChanged();
     void aiModelsChanged();
     void aiAvailableChanged();
+    void ollamaStateChanged();
 
 private slots:
     void initialLoad();
@@ -336,8 +346,11 @@ private:
 
     // ── AI Coach ──────────────────────────────────────────────────────────────
     QVariantList m_chatHistory;
-    bool         m_aiTyping    = false;
+    bool         m_aiTyping        = false;
     QStringList  m_aiModels;
     QString      m_aiModel;
-    bool         m_aiAvailable = false;
+    bool         m_aiAvailable     = false;
+    bool         m_ollamaInstalled = false;
+    bool         m_ollamaStarting  = false;
+    QProcess    *m_ollamaProcess   = nullptr;
 };
