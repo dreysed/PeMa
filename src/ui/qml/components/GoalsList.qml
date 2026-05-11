@@ -82,19 +82,18 @@ Item {
                         font.pixelSize: 11; color: goalsList.textMuted
                     }
 
-                    // Progress bar (only if progress field exists)
+                    // Progress bar
                     ColumnLayout {
                         Layout.fillWidth: true; spacing: 4
-                        visible: modelData.progress !== undefined
 
                         RowLayout {
                             Layout.fillWidth: true
                             Label {
-                                text: "Прогресс"
-                                font.pixelSize: 10; font.weight: Font.Black
-                                color: goalsList.textMuted; font.letterSpacing: 0.8
+                                text: modelData.progressLabel || "авто 50/50"
+                                font.pixelSize: 10; font.weight: Font.DemiBold
+                                color: goalsList.textMuted
+                                Layout.fillWidth: true; elide: Text.ElideRight
                             }
-                            Item { Layout.fillWidth: true }
                             Label {
                                 text: Math.round((modelData.progress || 0) * 100) + "%"
                                 font.pixelSize: 11; font.weight: Font.Bold
@@ -102,7 +101,6 @@ Item {
                             }
                         }
 
-                        // Progress bar track
                         Rectangle {
                             Layout.fillWidth: true; height: 6; radius: 3
                             color: goalsList.dark ? "#30363d" : "#e2e8f0"

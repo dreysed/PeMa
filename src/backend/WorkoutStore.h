@@ -179,7 +179,8 @@ public:
 
     // ── Routes ────────────────────────────────────────────────────────────────
     Q_INVOKABLE void generateRoute(double lat, double lon,
-                                   double distanceKm, const QString &preferences);
+                                   double distanceKm, const QString &preferences,
+                                   int count = 3);
     Q_INVOKABLE void buildRouteFromWaypoints(const QVariantList &waypoints, const QString &name);
     Q_INVOKABLE void deleteRoute(const QString &routeId);
     Q_INVOKABLE void setOpenAiKey(const QString &key);

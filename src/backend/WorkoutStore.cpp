@@ -1144,13 +1144,15 @@ void WorkoutStore::setServerUrl(const QString &url)
 }
 
 void WorkoutStore::generateRoute(double lat, double lon,
-                                  double distanceKm, const QString &preferences)
+                                  double distanceKm, const QString &preferences,
+                                  int count)
 {
     QJsonObject body;
     body[QStringLiteral("start_lat")]    = lat;
     body[QStringLiteral("start_lon")]    = lon;
     body[QStringLiteral("distance_km")]  = distanceKm;
     body[QStringLiteral("preferences")]  = preferences;
+    body[QStringLiteral("count")]        = count;
 
     setBusy(true);
     QTimer::singleShot(0, this, [this, body]() {

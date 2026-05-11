@@ -251,57 +251,47 @@ ApplicationWindow {
 
             RowLayout {
                 anchors { fill: parent; leftMargin: 20; rightMargin: 16 }
-                spacing: 6
+                spacing: 0
 
-                // Logo
+                // ── Logo ──────────────────────────────────────────────────────
                 Row {
-                    spacing: 6
+                    spacing: 8
                     Rectangle {
-                        width: 28; height: 28; radius: 7
-                        color: accent
+                        width: 28; height: 28; radius: 7; color: accent
                         anchors.verticalCenter: parent.verticalCenter
-                        Label { anchors.centerIn: parent; text: "S"; font.pixelSize: 15; font.weight: Font.Black; color: "#fff" }
+                        Label { anchors.centerIn: parent; text: "P"; font.pixelSize: 15; font.weight: Font.Black; color: "#fff" }
                     }
                     Label {
-                        text: "PeMa"
-                        font.pixelSize: 17
-                        font.weight: Font.Bold
-                        color: textPrimary
-                        anchors.verticalCenter: parent.verticalCenter
+                        text: "PeMa"; font.pixelSize: 17; font.weight: Font.Bold
+                        color: textPrimary; anchors.verticalCenter: parent.verticalCenter
                         font.letterSpacing: -0.3
                     }
                 }
 
-                // Nav tabs
+                Item { width: 20 }
+
+                // ── Nav tabs ──────────────────────────────────────────────────
                 Row {
                     spacing: 2
                     Repeater {
-                        model: ["Календарь", "Builder", "Аналитика", "Маршрут"]
+                        model: ["Календарь", "Шаблоны", "Аналитика", "Маршрут"]
                         delegate: Rectangle {
-                            width: lbl.implicitWidth + 28
-                            height: 34
-                            radius: 8
+                            width: lbl.implicitWidth + 28; height: 34; radius: 8
                             color: mainTabs.currentIndex === index
-                                   ? (dark ? "#1f1a40" : "#ede9fe")
-                                   : "transparent"
-                            // bottom accent line for active
+                                   ? (dark ? "#1f1a40" : "#ede9fe") : "transparent"
                             Rectangle {
                                 visible: mainTabs.currentIndex === index
                                 anchors { bottom: parent.bottom; left: parent.left; right: parent.right }
-                                height: 2; radius: 1
-                                color: accent
+                                height: 2; radius: 1; color: accent
                             }
                             Label {
-                                id: lbl
-                                anchors.centerIn: parent
-                                text: modelData
+                                id: lbl; anchors.centerIn: parent; text: modelData
                                 font.pixelSize: 13
                                 font.weight: mainTabs.currentIndex === index ? Font.DemiBold : Font.Normal
                                 color: mainTabs.currentIndex === index ? accent : textMuted
                             }
                             MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
+                                anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                 onClicked: mainTabs.currentIndex = index
                             }
                         }
@@ -310,74 +300,90 @@ ApplicationWindow {
 
                 Item { Layout.fillWidth: true }
 
-                // Athlete selector (only coach sees multiple athletes)
-                Label {
-                    visible: workoutStore.currentUserRole === "coach" && workoutStore.athletes.length > 0
-                    text: "Атлет"; color: textMuted; font.pixelSize: 12
-                }
-                ComboBox {
-                    id: athleteCombo
-                    visible: workoutStore.currentUserRole === "coach" && workoutStore.athletes.length > 0
-                    implicitWidth: 155; implicitHeight: 32
-                    model: workoutStore.athletes
-                    textRole: "name"; valueRole: "id"
-                    onActivated: i => { const a = model[i]; if (a) workoutStore.selectedAthleteId = a.id }
-                    Connections {
-                        target: workoutStore
-                        function onAthletesChanged() {
-                            for (let i = 0; i < workoutStore.athletes.length; ++i)
-                                if (workoutStore.athletes[i].id === workoutStore.selectedAthleteId) { athleteCombo.currentIndex = i; break }
+                // ── Right controls (own Row — clean spacing) ──────────────────
+                Row {
+                    spacing: 10
+                    anchors.verticalCenter: parent.verticalCenter
+
+                    // Athlete selector (coach only)
+                    Row {
+                        spacing: 6
+                        visible: workoutStore.currentUserRole === "coach"
+                        anchors.verticalCenter: parent.verticalCenter
+                        Label {
+                            visible: workoutStore.athletes.length > 0
+                            text: "Атлет"; color: textMuted; font.pixelSize: 12
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        ComboBox {
+                            id: athleteCombo
+                            visible: workoutStore.athletes.length > 0
+                            implicitWidth: 150; implicitHeight: 32
+                            model: workoutStore.athletes
+                            textRole: "name"; valueRole: "id"
+                            onActivated: i => { const a = model[i]; if (a) workoutStore.selectedAthleteId = a.id }
+                            Connections {
+                                target: workoutStore
+                                function onAthletesChanged() {
+                                    for (let i = 0; i < workoutStore.athletes.length; ++i)
+                                        if (workoutStore.athletes[i].id === workoutStore.selectedAthleteId) { athleteCombo.currentIndex = i; break }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            width: 32; height: 32; radius: 8; color: surface2
+                            border.width: 1; border.color: border
+                            anchors.verticalCenter: parent.verticalCenter
+                            Label { anchors.centerIn: parent; text: "＋👤"; font.pixelSize: 11 }
+                            ToolTip.text: "Добавить атлета"; ToolTip.visible: addAthleteMa.containsMouse; ToolTip.delay: 400
+                            MouseArea { id: addAthleteMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                                onClicked: linkAthleteDialog.open() }
                         }
                     }
-                }
 
-                // "Add athlete" button for coaches
-                RoundButton {
-                    width: 32; height: 32; radius: 8; flat: true
-                    text: "＋👤"; font.pixelSize: 12
-                    visible: workoutStore.currentUserRole === "coach"
-                    ToolTip.text: "Добавить атлета"; ToolTip.visible: hovered; ToolTip.delay: 500
-                    onClicked: linkAthleteDialog.open()
-                }
+                    // Vertical separator
+                    Rectangle {
+                        width: 1; height: 22; color: border; opacity: 0.6
+                        visible: workoutStore.currentUserRole === "coach"
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
 
-                // User pill
-                Rectangle {
-                    visible: workoutStore.isLoggedIn
-                    height: 32; width: userPillRow.implicitWidth + 20; radius: 8
-                    color: surface2; border.width: 1; border.color: border
-                    RowLayout {
-                        id: userPillRow
-                        anchors.centerIn: parent; spacing: 6
-                        Label {
-                            text: workoutStore.currentUserRole === "coach" ? "🏋" : "🏃"
-                            font.pixelSize: 14
-                        }
-                        Label {
-                            text: workoutStore.currentUserName
-                            font.pixelSize: 12; font.weight: Font.DemiBold
-                            color: textPrimary
+                    // User pill
+                    Rectangle {
+                        visible: workoutStore.isLoggedIn
+                        height: 32; width: userPillRow.implicitWidth + 20; radius: 8
+                        color: surface2; border.width: 1; border.color: border
+                        anchors.verticalCenter: parent.verticalCenter
+                        Row {
+                            id: userPillRow
+                            anchors.centerIn: parent; spacing: 6
+                            Label {
+                                text: workoutStore.currentUserRole === "coach" ? "🏋" : "🏃"
+                                font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Label {
+                                text: workoutStore.currentUserName
+                                font.pixelSize: 12; font.weight: Font.DemiBold
+                                color: textPrimary; anchors.verticalCenter: parent.verticalCenter
+                            }
                         }
                     }
-                }
 
-                RoundButton {
-                    width: 32; height: 32; radius: 8; flat: true
-                    text: "⚙"; font.pixelSize: 16
-                    onClicked: settingsPanel.toggle()
-                    ToolTip.text: "Настройки"; ToolTip.visible: hovered; ToolTip.delay: 500
-                }
-                RoundButton {
-                    width: 32; height: 32; radius: 8; flat: true
-                    text: themeIcon(); font.pixelSize: 15
-                    onClicked: nextTheme()
-                    ToolTip.text: "Сменить тему"; ToolTip.visible: hovered; ToolTip.delay: 500
-                }
-                RoundButton {
-                    visible: workoutStore.isLoggedIn
-                    width: 32; height: 32; radius: 8; flat: true
-                    text: "⏏"; font.pixelSize: 15
-                    ToolTip.text: "Выйти"; ToolTip.visible: hovered; ToolTip.delay: 500
-                    onClicked: workoutStore.logout()
+                    // Vertical separator before settings
+                    Rectangle {
+                        width: 1; height: 22; color: border; opacity: 0.6
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+
+                    // Settings gear
+                    Rectangle {
+                        width: 34; height: 34; radius: 8; color: "transparent"
+                        anchors.verticalCenter: parent.verticalCenter
+                        Label { anchors.centerIn: parent; text: "⚙"; font.pixelSize: 20; color: textMuted }
+                        ToolTip.text: "Настройки"; ToolTip.visible: gearMa.containsMouse; ToolTip.delay: 400
+                        MouseArea { id: gearMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
+                            onClicked: settingsPanel.toggle() }
+                    }
                 }
             }
         }
@@ -519,28 +525,11 @@ ApplicationWindow {
                                             }
                                         }
 
-                                        // Goal marker 🏆 — centred at bottom of cell
-                                        Label {
-                                            anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: 3 }
-                                            text: "🏆"
-                                            font.pixelSize: 11; z: 5
-                                            visible: {
-                                                var iso = day.dateIso || ""
-                                                var goals = workoutStore.goals
-                                                for (var g = 0; g < goals.length; g++) {
-                                                    if (goals[g].targetDate === iso) return true
-                                                }
-                                                return false
-                                            }
-                                            ToolTip.visible: {
-                                                var iso = day.dateIso || ""
-                                                var goals = workoutStore.goals
-                                                for (var g = 0; g < goals.length; g++) {
-                                                    if (goals[g].targetDate === iso) return hov.containsMouse
-                                                }
-                                                return false
-                                            }
-                                            ToolTip.text: {
+                                        // Goal marker 🎯 — always visible, big & centred
+                                        Item {
+                                            id: goalMarker
+                                            anchors.fill: parent; z: 5
+                                            property string goalNames: {
                                                 var iso = day.dateIso || ""
                                                 var goals = workoutStore.goals
                                                 var names = []
@@ -549,7 +538,25 @@ ApplicationWindow {
                                                 }
                                                 return names.join(", ")
                                             }
-                                            ToolTip.delay: 200
+                                            visible: goalNames !== ""
+                                            // Big icon centred in cell
+                                            Label {
+                                                anchors.centerIn: parent
+                                                text: "🎯"
+                                                font.pixelSize: 32
+                                            }
+                                            // Name always shown at the very bottom
+                                            Label {
+                                                anchors.bottom: parent.bottom
+                                                anchors.bottomMargin: 4
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                width: parent.width - 8
+                                                text: goalMarker.goalNames
+                                                font.pixelSize: 8; font.weight: Font.Medium
+                                                color: textMuted
+                                                horizontalAlignment: Text.AlignHCenter
+                                                elide: Text.ElideRight
+                                            }
                                         }
 
                                         Column {
@@ -655,7 +662,7 @@ ApplicationWindow {
                                             width: 30; height: 30; radius: 8
                                             color: surface2; border.width: 1; border.color: border
                                             ToolTip.visible: goalAddMa.containsMouse; ToolTip.text: "Добавить цель на эту дату"; ToolTip.delay: 400
-                                            Label { anchors.centerIn: parent; text: "🏆"; font.pixelSize: 14 }
+                                            Label { anchors.centerIn: parent; text: "🎯"; font.pixelSize: 14 }
                                             MouseArea {
                                                 id: goalAddMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                                 onClicked: { goalCreateDialog.prefillDate = workoutStore.selectedDateIso; goalCreateDialog.open() }
@@ -980,7 +987,7 @@ ApplicationWindow {
                     }
                 }
 
-                // ── TAB 1: Builder ─────────────────────────────────────────────
+                // ── TAB 1: Шаблоны ─────────────────────────────────────────────
                 RowLayout {
                     spacing: 0
 
@@ -1377,7 +1384,7 @@ ApplicationWindow {
                                         Label {
                                             visible: (root.analyticsObj.activeGoals || workoutStore.goals || []).length === 0
                                             Layout.fillWidth: true; wrapMode: Text.Wrap
-                                            text: "Цели добавляются из Календаря — нажмите 🏆 на нужной дате"
+                                            text: "Цели добавляются из Календаря — нажмите 🎯 на нужной дате"
                                             font.pixelSize: 11; color: textMuted
                                         }
                                     }
@@ -1528,8 +1535,8 @@ ApplicationWindow {
                     stravaConnected:    workoutStore.stravaConnected
                     stravaHasClientId:  workoutStore.stravaHasClientId
 
-                    onGenerateRequested: function(lat, lon, distKm, prefs) {
-                        workoutStore.generateRoute(lat, lon, distKm, prefs)
+                    onGenerateRequested: function(lat, lon, distKm, prefs, count) {
+                        workoutStore.generateRoute(lat, lon, distKm, prefs, count)
                     }
                     onDeleteRouteRequested: function(id) {
                         workoutStore.deleteRoute(id)
@@ -1598,51 +1605,81 @@ ApplicationWindow {
     }
 
     // ── Strava settings dialog ───────────────────────────────────────────────
-    Dialog {
+    Popup {
         id: stravaSettingsDlg
-        title: "Настройки Strava"
+        modal: true; focus: true
         anchors.centerIn: Overlay.overlay
-        width: 360
-        modal: true
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 400; padding: 0
+        closePolicy: Popup.NoAutoClose
 
         property string savedClientId: ""
         property string savedClientSecret: ""
 
-        onOpened: {
-            stravaClientIdField.text    = ""
-            stravaClientSecretField.text = ""
-        }
-        onAccepted: {
-            var cid = stravaClientIdField.text.trim()
-            var cs  = stravaClientSecretField.text.trim()
-            if (cid && cs)
-                workoutStore.saveStravaCredentials(cid, cs)
-        }
+        background: Rectangle { radius: 14; color: root.surface; border.width: 1; border.color: root.border }
 
         ColumnLayout {
-            width: parent.width; spacing: 14
-            Label {
-                Layout.fillWidth: true; wrapMode: Text.Wrap
-                text: "Создайте приложение на strava.com/settings/api, скопируйте Client ID и Client Secret."
-                font.pixelSize: 12; color: root.textMuted
+            width: stravaSettingsDlg.width; spacing: 0
+
+            Rectangle {
+                Layout.fillWidth: true; height: 56; radius: 14; color: root.surface2
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 14; color: parent.color }
+                RowLayout {
+                    anchors { fill: parent; leftMargin: 20; rightMargin: 14 }
+                    Label { text: "Настройки Strava"; font.pixelSize: 15; font.weight: Font.DemiBold; color: root.textPrimary; Layout.fillWidth: true }
+                    Rectangle { width: 30; height: 30; radius: 8; color: "transparent"
+                        Label { anchors.centerIn: parent; text: "✕"; font.pixelSize: 14; color: root.textMuted }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: stravaSettingsDlg.close() } }
+                }
             }
-            Label { text: "Client ID"; font.pixelSize: 11; font.weight: Font.DemiBold; color: root.textPrimary }
-            TextField {
-                id: stravaClientIdField
-                Layout.fillWidth: true; placeholderText: "12345"
-                font.pixelSize: 13
+            Rectangle { Layout.fillWidth: true; height: 1; color: root.border }
+
+            ColumnLayout {
+                Layout.fillWidth: true; Layout.margins: 20; spacing: 14
+                Label {
+                    Layout.fillWidth: true; wrapMode: Text.Wrap
+                    text: "Создайте приложение на strava.com/settings/api, скопируйте Client ID и Client Secret."
+                    font.pixelSize: 12; color: root.textMuted
+                }
+                Label { text: "Client ID"; font.pixelSize: 11; font.weight: Font.DemiBold; color: root.textPrimary }
+                TextField {
+                    id: stravaClientIdField
+                    Layout.fillWidth: true; placeholderText: "12345"
+                    font.pixelSize: 13
+                }
+                Label { text: "Client Secret"; font.pixelSize: 11; font.weight: Font.DemiBold; color: root.textPrimary }
+                TextField {
+                    id: stravaClientSecretField
+                    Layout.fillWidth: true; placeholderText: "abc123..."
+                    font.pixelSize: 13; echoMode: TextInput.PasswordEchoOnEdit
+                }
+                Label {
+                    Layout.fillWidth: true; wrapMode: Text.Wrap
+                    text: "После сохранения нажмите «Подключить Strava» — откроется браузер для авторизации."
+                    font.pixelSize: 11; color: root.textMuted
+                }
             }
-            Label { text: "Client Secret"; font.pixelSize: 11; font.weight: Font.DemiBold; color: root.textPrimary }
-            TextField {
-                id: stravaClientSecretField
-                Layout.fillWidth: true; placeholderText: "abc123..."
-                font.pixelSize: 13; echoMode: TextInput.PasswordEchoOnEdit
-            }
-            Label {
-                Layout.fillWidth: true; wrapMode: Text.Wrap
-                text: "После сохранения нажмите «Подключить Strava» — откроется браузер для авторизации."
-                font.pixelSize: 11; color: root.textMuted
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: root.border }
+
+            Rectangle {
+                Layout.fillWidth: true; height: 60; radius: 14; color: root.surface2
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 14; color: parent.color }
+                RowLayout {
+                    anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 20; spacing: 10
+                    Item { Layout.fillWidth: true }
+                    Rectangle { height: 34; width: cancelLbl_sdlg.implicitWidth + 24; radius: 8; color: "transparent"; border.width: 1; border.color: root.border
+                        Label { id: cancelLbl_sdlg; anchors.centerIn: parent; text: "Отмена"; font.pixelSize: 13; color: root.textMuted }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: stravaSettingsDlg.close() } }
+                    Rectangle { height: 34; width: saveLbl_sdlg.implicitWidth + 24; radius: 8; color: root.accent
+                        Label { id: saveLbl_sdlg; anchors.centerIn: parent; text: "Сохранить"; font.pixelSize: 13; font.weight: Font.DemiBold; color: "#fff" }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: {
+                            var cid = stravaClientIdField.text.trim()
+                            var cs  = stravaClientSecretField.text.trim()
+                            if (cid && cs)
+                                workoutStore.saveStravaCredentials(cid, cs)
+                            stravaSettingsDlg.close()
+                        } } }
+                }
             }
         }
     }
@@ -1669,45 +1706,169 @@ ApplicationWindow {
         }
     }
 
-    Dialog {
-        id: confirmDeleteWorkout; title: "Удалить тренировку?"; modal: true
-        anchors.centerIn: Overlay.overlay; standardButtons: Dialog.Yes | Dialog.Cancel
-        Label { text: "Это действие нельзя отменить." }
-        onAccepted: { workoutStore.deleteWorkout(deleteWorkoutId); deleteWorkoutId = "" }
-        onRejected: deleteWorkoutId = ""
+    Popup {
+        id: confirmDeleteWorkout
+        modal: true; focus: true
+        anchors.centerIn: Overlay.overlay
+        width: 380; padding: 0
+        closePolicy: Popup.NoAutoClose
+
+        background: Rectangle { radius: 14; color: root.surface; border.width: 1; border.color: root.border }
+
+        ColumnLayout {
+            width: confirmDeleteWorkout.width; spacing: 0
+
+            Rectangle {
+                Layout.fillWidth: true; height: 56; radius: 14; color: root.surface2
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 14; color: parent.color }
+                RowLayout {
+                    anchors { fill: parent; leftMargin: 20; rightMargin: 14 }
+                    Label { text: "Удалить тренировку?"; font.pixelSize: 15; font.weight: Font.DemiBold; color: root.textPrimary; Layout.fillWidth: true }
+                    Rectangle { width: 30; height: 30; radius: 8; color: "transparent"
+                        Label { anchors.centerIn: parent; text: "✕"; font.pixelSize: 14; color: root.textMuted }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { confirmDeleteWorkout.close(); deleteWorkoutId = "" } } }
+                }
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: root.border }
+
+            ColumnLayout {
+                Layout.fillWidth: true; Layout.margins: 20; spacing: 0
+                Label { text: "Это действие нельзя отменить."; font.pixelSize: 13; color: root.textPrimary }
+            }
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: root.border }
+
+            Rectangle {
+                Layout.fillWidth: true; height: 60; radius: 14; color: root.surface2
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 14; color: parent.color }
+                RowLayout {
+                    anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 20; spacing: 10
+                    Item { Layout.fillWidth: true }
+                    Rectangle { height: 34; width: cancelLbl_cdw.implicitWidth + 24; radius: 8; color: "transparent"; border.width: 1; border.color: root.border
+                        Label { id: cancelLbl_cdw; anchors.centerIn: parent; text: "Отмена"; font.pixelSize: 13; color: root.textMuted }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { confirmDeleteWorkout.close(); deleteWorkoutId = "" } } }
+                    Rectangle { height: 34; width: deleteLbl_cdw.implicitWidth + 24; radius: 8; color: "#ef4444"
+                        Label { id: deleteLbl_cdw; anchors.centerIn: parent; text: "Удалить"; font.pixelSize: 13; font.weight: Font.DemiBold; color: "#fff" }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: {
+                            workoutStore.deleteWorkout(deleteWorkoutId); deleteWorkoutId = ""
+                            confirmDeleteWorkout.close()
+                        } } }
+                }
+            }
+        }
     }
-    Dialog {
-        id: confirmDeleteTemplate; title: "Удалить шаблон?"; modal: true
-        anchors.centerIn: Overlay.overlay; standardButtons: Dialog.Yes | Dialog.Cancel
-        Label { text: "Это действие нельзя отменить." }
-        onAccepted: { workoutStore.deleteTemplate(deleteTemplateId); deleteTemplateId = "" }
-        onRejected: deleteTemplateId = ""
+    Popup {
+        id: confirmDeleteTemplate
+        modal: true; focus: true
+        anchors.centerIn: Overlay.overlay
+        width: 380; padding: 0
+        closePolicy: Popup.NoAutoClose
+
+        background: Rectangle { radius: 14; color: root.surface; border.width: 1; border.color: root.border }
+
+        ColumnLayout {
+            width: confirmDeleteTemplate.width; spacing: 0
+
+            Rectangle {
+                Layout.fillWidth: true; height: 56; radius: 14; color: root.surface2
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 14; color: parent.color }
+                RowLayout {
+                    anchors { fill: parent; leftMargin: 20; rightMargin: 14 }
+                    Label { text: "Удалить шаблон?"; font.pixelSize: 15; font.weight: Font.DemiBold; color: root.textPrimary; Layout.fillWidth: true }
+                    Rectangle { width: 30; height: 30; radius: 8; color: "transparent"
+                        Label { anchors.centerIn: parent; text: "✕"; font.pixelSize: 14; color: root.textMuted }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { confirmDeleteTemplate.close(); deleteTemplateId = "" } } }
+                }
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: root.border }
+
+            ColumnLayout {
+                Layout.fillWidth: true; Layout.margins: 20; spacing: 0
+                Label { text: "Это действие нельзя отменить."; font.pixelSize: 13; color: root.textPrimary }
+            }
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: root.border }
+
+            Rectangle {
+                Layout.fillWidth: true; height: 60; radius: 14; color: root.surface2
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 14; color: parent.color }
+                RowLayout {
+                    anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 20; spacing: 10
+                    Item { Layout.fillWidth: true }
+                    Rectangle { height: 34; width: cancelLbl_cdt.implicitWidth + 24; radius: 8; color: "transparent"; border.width: 1; border.color: root.border
+                        Label { id: cancelLbl_cdt; anchors.centerIn: parent; text: "Отмена"; font.pixelSize: 13; color: root.textMuted }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: { confirmDeleteTemplate.close(); deleteTemplateId = "" } } }
+                    Rectangle { height: 34; width: deleteLbl_cdt.implicitWidth + 24; radius: 8; color: "#ef4444"
+                        Label { id: deleteLbl_cdt; anchors.centerIn: parent; text: "Удалить"; font.pixelSize: 13; font.weight: Font.DemiBold; color: "#fff" }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: {
+                            workoutStore.deleteTemplate(deleteTemplateId); deleteTemplateId = ""
+                            confirmDeleteTemplate.close()
+                        } } }
+                }
+            }
+        }
     }
 
     // ── Link-athlete dialog (coach only) ─────────────────────────────────────
-    Dialog {
+    Popup {
         id: linkAthleteDialog
-        title: "Добавить атлета"
-        modal: true
+        modal: true; focus: true
         anchors.centerIn: Overlay.overlay
-        standardButtons: Dialog.Ok | Dialog.Cancel
+        width: 400; padding: 0
+        closePolicy: Popup.NoAutoClose
 
         property string athleteEmail: ""
 
         onOpened: { athleteEmail = ""; linkEmailField.text = "" }
-        onAccepted: {
-            var email = linkEmailField.text.trim()
-            if (email.length > 0) workoutStore.linkAthlete(email)
-        }
+
+        background: Rectangle { radius: 14; color: root.surface; border.width: 1; border.color: root.border }
 
         ColumnLayout {
-            spacing: 10; width: 300
-            Label { text: "Email атлета:"; font.pixelSize: 12; color: root.textMuted }
-            TextField {
-                id: linkEmailField
-                Layout.fillWidth: true; implicitHeight: 38
-                placeholderText: "athlete@example.com"
-                inputMethodHints: Qt.ImhEmailCharactersOnly
+            width: linkAthleteDialog.width; spacing: 0
+
+            Rectangle {
+                Layout.fillWidth: true; height: 56; radius: 14; color: root.surface2
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; height: 14; color: parent.color }
+                RowLayout {
+                    anchors { fill: parent; leftMargin: 20; rightMargin: 14 }
+                    Label { text: "Добавить атлета"; font.pixelSize: 15; font.weight: Font.DemiBold; color: root.textPrimary; Layout.fillWidth: true }
+                    Rectangle { width: 30; height: 30; radius: 8; color: "transparent"
+                        Label { anchors.centerIn: parent; text: "✕"; font.pixelSize: 14; color: root.textMuted }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: linkAthleteDialog.close() } }
+                }
+            }
+            Rectangle { Layout.fillWidth: true; height: 1; color: root.border }
+
+            ColumnLayout {
+                Layout.fillWidth: true; Layout.margins: 20; spacing: 10
+                Label { text: "Email атлета:"; font.pixelSize: 12; color: root.textMuted }
+                TextField {
+                    id: linkEmailField
+                    Layout.fillWidth: true; implicitHeight: 38
+                    placeholderText: "athlete@example.com"
+                    inputMethodHints: Qt.ImhEmailCharactersOnly
+                }
+            }
+
+            Rectangle { Layout.fillWidth: true; height: 1; color: root.border }
+
+            Rectangle {
+                Layout.fillWidth: true; height: 60; radius: 14; color: root.surface2
+                Rectangle { anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; height: 14; color: parent.color }
+                RowLayout {
+                    anchors.fill: parent; anchors.leftMargin: 20; anchors.rightMargin: 20; spacing: 10
+                    Item { Layout.fillWidth: true }
+                    Rectangle { height: 34; width: cancelLbl_lad.implicitWidth + 24; radius: 8; color: "transparent"; border.width: 1; border.color: root.border
+                        Label { id: cancelLbl_lad; anchors.centerIn: parent; text: "Отмена"; font.pixelSize: 13; color: root.textMuted }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: linkAthleteDialog.close() } }
+                    Rectangle { height: 34; width: addLbl_lad.implicitWidth + 24; radius: 8; color: root.accent
+                        Label { id: addLbl_lad; anchors.centerIn: parent; text: "Добавить"; font.pixelSize: 13; font.weight: Font.DemiBold; color: "#fff" }
+                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor; onClicked: {
+                            var email = linkEmailField.text.trim()
+                            if (email.length > 0) workoutStore.linkAthlete(email)
+                            linkAthleteDialog.close()
+                        } } }
+                }
             }
         }
     }
@@ -1742,16 +1903,22 @@ ApplicationWindow {
         accent:      root.accent
         dark:        root.dark
 
-        themeMode:    root.themeMode
-        serverUrl:    workoutStore.serverUrl
-        hasOpenAiKey: workoutStore.hasOpenAiKey
+        themeMode:         root.themeMode
+        serverUrl:         workoutStore.serverUrl
+        isLoggedIn:        workoutStore.isLoggedIn
+        stravaConnected:   workoutStore.stravaConnected
+        stravaHasClientId: workoutStore.stravaHasClientId
 
         onThemeModeChangeRequested: function(mode) { root.themeMode = mode }
         onServerUrlChangeRequested: function(url) { workoutStore.serverUrl = url }
-        onOpenAiKeyRequested: {
-            settingsPanel.close()
-            openAiKeyDlg.open()
+        onLogoutRequested: { settingsPanel.close(); workoutStore.logout() }
+        onStravaConnectRequested: {
+            if (!workoutStore.stravaHasClientId) { settingsPanel.close(); stravaSettingsDlg.open() }
+            else workoutStore.connectStrava()
         }
+        onStravaDisconnectRequested: workoutStore.disconnectStrava()
+        onStravaSyncRequested: workoutStore.syncStrava()
+        onStravaSettingsRequested: { settingsPanel.close(); stravaSettingsDlg.open() }
     }
 
     // ── Auth overlay ──────────────────────────────────────────────────────────

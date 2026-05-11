@@ -2,10 +2,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-/**
- * Slide-in settings panel from the right edge of the window.
- * Call open() / close() to show/hide.
- */
 Item {
     id: panel
     visible: _open || drawerAnim.running || overlayAnim.running
@@ -20,16 +16,24 @@ Item {
     property color textPrimary: "#0d1117"
     property color textMuted:   "#57606a"
     property color accent:      "#6366f1"
+    property color runColor:    "#22c55e"
     property bool  dark:        false
 
     // ── Bindings ──────────────────────────────────────────────────────────────
-    property string themeMode:    "light"
-    property string serverUrl:    "http://localhost:8000"
-    property bool   hasOpenAiKey: false
+    property string themeMode:         "light"
+    property string serverUrl:         "http://localhost:8000"
+    property bool   isLoggedIn:        false
+    property bool   stravaConnected:   false
+    property bool   stravaHasClientId: false
 
+    // ── Signals ───────────────────────────────────────────────────────────────
     signal themeModeChangeRequested(string mode)
     signal serverUrlChangeRequested(string url)
-    signal openAiKeyRequested()
+    signal logoutRequested()
+    signal stravaConnectRequested()
+    signal stravaDisconnectRequested()
+    signal stravaSyncRequested()
+    signal stravaSettingsRequested()
 
     function open()  { _open = true }
     function close() { _open = false }
@@ -49,63 +53,87 @@ Item {
     Rectangle {
         id: drawer
         width: 340
-        anchors { top: parent.top; bottom: parent.bottom; right: parent.right }
+        anchors.top: parent.top; anchors.bottom: parent.bottom; anchors.right: parent.right
         x: panel._open ? parent.width - width : parent.width
         Behavior on x { NumberAnimation { id: drawerAnim; duration: 240; easing.type: Easing.OutCubic } }
-
         color: panel.surface
-        // Left shadow line
+
         Rectangle {
-            anchors { left: parent.left; top: parent.top; bottom: parent.bottom }
+            anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
             width: 1; color: panel.borderCol
         }
 
         ScrollView {
+            id: settingsScroll
             anchors.fill: parent
             contentWidth: availableWidth
+            clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-            ColumnLayout {
-                width: parent.width
-                anchors { leftMargin: 24; rightMargin: 24; topMargin: 28; bottomMargin: 24 }
-                spacing: 24
+            Column {
+                width: settingsScroll.availableWidth
+                spacing: 0
 
-                // Header
-                RowLayout {
-                    Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
-                    Label { text: "Настройки"; font.pixelSize: 18; font.weight: Font.Black; color: panel.textPrimary }
-                    Item { Layout.fillWidth: true }
-                    RoundButton {
-                        width: 28; height: 28; radius: 8; flat: true
-                        text: "✕"; font.pixelSize: 14
-                        onClicked: panel.close()
+                // ── Header ────────────────────────────────────────────────────
+                Rectangle {
+                    width: parent.width; height: 60; color: "transparent"
+                    RowLayout {
+                        anchors.fill: parent; anchors.leftMargin: 24; anchors.rightMargin: 16
+                        Label {
+                            text: "Настройки"
+                            font.pixelSize: 18; font.weight: Font.Black; color: panel.textPrimary
+                            Layout.fillWidth: true
+                        }
+                        Rectangle {
+                            width: 30; height: 30; radius: 8; color: "transparent"
+                            Label { anchors.centerIn: parent; text: "✕"; font.pixelSize: 14; color: panel.textMuted }
+                            MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                onClicked: panel.close() }
+                        }
                     }
                 }
+                Rectangle { width: parent.width; height: 1; color: panel.borderCol }
 
-                // ── Внешний вид ──────────────────────────────────────────────
-                ColumnLayout {
-                    Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
-                    spacing: 8
-                    Label { text: "ВНЕШНИЙ ВИД"; font.pixelSize: 9; font.weight: Font.Black; color: panel.textMuted; font.letterSpacing: 1.2 }
+                Item { width: parent.width; height: 20 }
+
+                // ── Внешний вид ───────────────────────────────────────────────
+                Column {
+                    width: parent.width - 48; x: 24; spacing: 8
+
+                    Label {
+                        text: "ВНЕШНИЙ ВИД"
+                        font.pixelSize: 9; font.weight: Font.Black
+                        color: panel.textMuted; font.letterSpacing: 1.2
+                    }
+
                     Rectangle {
-                        Layout.fillWidth: true; height: 46; radius: 10
+                        width: parent.width; height: 50; radius: 10
                         color: panel.surface2; border.width: 1; border.color: panel.borderCol
                         RowLayout {
-                            anchors { fill: parent; leftMargin: 14; rightMargin: 12 }
-                            Label { text: "Тема"; font.pixelSize: 13; color: panel.textPrimary; Layout.fillWidth: true }
+                            anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 12
+                            Label {
+                                text: "Тема"; font.pixelSize: 13; color: panel.textPrimary
+                                Layout.fillWidth: true
+                            }
                             Row {
                                 spacing: 4
                                 Repeater {
-                                    model: [{ icon:"☀", v:"light" },{ icon:"☾", v:"dark" },{ icon:"⊙", v:"system" }]
+                                    model: [
+                                        { icon: "☀", v: "light",  label: "Светлая" },
+                                        { icon: "☾", v: "dark",   label: "Тёмная" },
+                                        { icon: "⊙", v: "system", label: "Авто" }
+                                    ]
                                     Rectangle {
-                                        width: 34; height: 28; radius: 7
+                                        width: 36; height: 28; radius: 7
                                         color: panel.themeMode === modelData.v ? panel.accent : "transparent"
                                         border.width: 1
                                         border.color: panel.themeMode === modelData.v ? panel.accent : panel.borderCol
-                                        Label { anchors.centerIn: parent; text: modelData.icon; font.pixelSize: 14;
-                                                color: panel.themeMode === modelData.v ? "#fff" : panel.textMuted }
+                                        Label {
+                                            anchors.centerIn: parent; text: modelData.icon; font.pixelSize: 14
+                                            color: panel.themeMode === modelData.v ? "#fff" : panel.textMuted
+                                        }
                                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                                    onClicked: panel.themeModeChangeRequested(modelData.v) }
+                                            onClicked: panel.themeModeChangeRequested(modelData.v) }
                                     }
                                 }
                             }
@@ -113,105 +141,157 @@ Item {
                     }
                 }
 
-                // ── Сервер ───────────────────────────────────────────────────
-                ColumnLayout {
-                    Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
-                    spacing: 8
-                    Label { text: "СЕРВЕР"; font.pixelSize: 9; font.weight: Font.Black; color: panel.textMuted; font.letterSpacing: 1.2 }
-                    Rectangle {
-                        Layout.fillWidth: true; height: 60; radius: 10
-                        color: panel.surface2; border.width: 1; border.color: panel.borderCol
-                        ColumnLayout {
-                            anchors { fill: parent; margins: 12 }
-                            spacing: 2
-                            Label { text: "URL бэкенда"; font.pixelSize: 10; color: panel.textMuted }
-                            TextField {
-                                Layout.fillWidth: true; implicitHeight: 30
-                                text: panel.serverUrl; font.pixelSize: 12
-                                background: Rectangle { color: "transparent" }
-                                onEditingFinished: panel.serverUrlChangeRequested(text.trim())
-                            }
-                        }
-                    }
+                Item { width: parent.width; height: 20 }
+
+                // ── Strava ────────────────────────────────────────────────────
+                Column {
+                    width: parent.width - 48; x: 24; spacing: 8
+
                     Label {
-                        Layout.fillWidth: true
-                        text: "По умолчанию http://localhost:8000 — изменяйте только если запускаете сервер на другом хосте"
-                        font.pixelSize: 10; color: panel.textMuted; wrapMode: Text.Wrap
+                        text: "STRAVA"
+                        font.pixelSize: 9; font.weight: Font.Black
+                        color: panel.textMuted; font.letterSpacing: 1.2
                     }
-                }
 
-                // ── ИИ маршруты ──────────────────────────────────────────────
-                ColumnLayout {
-                    Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
-                    spacing: 8
-                    Label { text: "ИИ · МАРШРУТЫ"; font.pixelSize: 9; font.weight: Font.Black; color: panel.textMuted; font.letterSpacing: 1.2 }
                     Rectangle {
-                        Layout.fillWidth: true; height: 46; radius: 10
-                        color: panel.surface2; border.width: 1; border.color: panel.borderCol
-                        RowLayout {
-                            anchors { fill: parent; leftMargin: 14; rightMargin: 12 }
-                            Column {
-                                spacing: 1
-                                Label { text: "OpenAI API ключ"; font.pixelSize: 13; color: panel.textPrimary }
-                                Label {
-                                    text: panel.hasOpenAiKey ? "✓ Задан" : "Не задан"
-                                    font.pixelSize: 10
-                                    color: panel.hasOpenAiKey ? "#22c55e" : panel.textMuted
-                                }
-                            }
-                            Item { Layout.fillWidth: true }
-                            Rectangle {
-                                width: aiLbl.implicitWidth + 16; height: 28; radius: 7; color: panel.accent
-                                Label { id: aiLbl; anchors.centerIn: parent
-                                        text: panel.hasOpenAiKey ? "Изменить" : "Добавить"
-                                        font.pixelSize: 11; font.weight: Font.DemiBold; color: "#fff" }
-                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                            onClicked: panel.openAiKeyRequested() }
-                            }
-                        }
-                    }
-                }
+                        width: parent.width
+                        height: stravaInner.implicitHeight + 24
+                        radius: 10; color: panel.surface2
+                        border.width: 1; border.color: panel.borderCol
 
-                // ── Синхронизация ─────────────────────────────────────────────
-                ColumnLayout {
-                    Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
-                    spacing: 8
-                    Label { text: "СИНХРОНИЗАЦИЯ С ЧАСАМИ"; font.pixelSize: 9; font.weight: Font.Black; color: panel.textMuted; font.letterSpacing: 1.2 }
-                    Rectangle {
-                        Layout.fillWidth: true; height: syncInner.implicitHeight + 24; radius: 10
-                        color: panel.surface2; border.width: 1; border.color: panel.borderCol
-                        ColumnLayout {
-                            id: syncInner
-                            anchors { fill: parent; margins: 14 }
+                        Column {
+                            id: stravaInner
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.top: parent.top; anchors.margins: 14
                             spacing: 10
 
-                            Label {
-                                Layout.fillWidth: true
-                                text: "PeMa принимает файлы .gpx и .fit. Экспортируй активность из приложения своего устройства."
-                                font.pixelSize: 12; color: panel.textPrimary; wrapMode: Text.Wrap
+                            RowLayout {
+                                width: parent.width
+                                // Status dot + text
+                                Rectangle {
+                                    width: 8; height: 8; radius: 4
+                                    color: panel.stravaConnected ? panel.runColor : panel.borderCol
+                                }
+                                Label {
+                                    text: panel.stravaConnected ? "Подключено" : "Не подключено"
+                                    font.pixelSize: 13; font.weight: Font.DemiBold
+                                    color: panel.stravaConnected ? panel.runColor : panel.textPrimary
+                                    Layout.fillWidth: true
+                                }
                             }
 
-                            // Device list with export instructions
+                            Label {
+                                width: parent.width
+                                text: panel.stravaConnected
+                                    ? "Активности синхронизируются с вашим аккаунтом Strava"
+                                    : "Подключите аккаунт Strava чтобы тренировки автоматически попадали в календарь"
+                                font.pixelSize: 11; color: panel.textMuted; wrapMode: Text.Wrap
+                            }
+
+                            Row {
+                                spacing: 8
+
+                                // Connect / Disconnect button
+                                Rectangle {
+                                    height: 32; width: stravaConnLbl.implicitWidth + 20; radius: 8
+                                    color: panel.stravaConnected ? panel.surface : "#FC4C02"
+                                    border.width: panel.stravaConnected ? 1 : 0
+                                    border.color: panel.borderCol
+                                    Label {
+                                        id: stravaConnLbl; anchors.centerIn: parent
+                                        text: panel.stravaConnected ? "Отключить" : "Подключить Strava"
+                                        font.pixelSize: 12; font.weight: Font.DemiBold
+                                        color: panel.stravaConnected ? panel.textMuted : "#fff"
+                                    }
+                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (panel.stravaConnected) panel.stravaDisconnectRequested()
+                                            else if (!panel.stravaHasClientId) panel.stravaSettingsRequested()
+                                            else panel.stravaConnectRequested()
+                                        }
+                                    }
+                                }
+
+                                // Sync button (only when connected)
+                                Rectangle {
+                                    visible: panel.stravaConnected
+                                    height: 32; width: stravaSyncLbl.implicitWidth + 20; radius: 8
+                                    color: panel.surface2; border.width: 1; border.color: panel.borderCol
+                                    Label {
+                                        id: stravaSyncLbl; anchors.centerIn: parent
+                                        text: "Синхронизировать"
+                                        font.pixelSize: 12; color: panel.accent
+                                    }
+                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: panel.stravaSyncRequested() }
+                                }
+
+                                // Settings button (only when has client id)
+                                Rectangle {
+                                    visible: panel.stravaHasClientId
+                                    height: 32; width: stravaSetLbl.implicitWidth + 20; radius: 8
+                                    color: "transparent"; border.width: 1; border.color: panel.borderCol
+                                    Label {
+                                        id: stravaSetLbl; anchors.centerIn: parent
+                                        text: "API ключи"
+                                        font.pixelSize: 12; color: panel.textMuted
+                                    }
+                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: panel.stravaSettingsRequested() }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Item { width: parent.width; height: 20 }
+
+                // ── Синхронизация с часами ────────────────────────────────────
+                Column {
+                    width: parent.width - 48; x: 24; spacing: 8
+
+                    Label {
+                        text: "СИНХРОНИЗАЦИЯ С ЧАСАМИ"
+                        font.pixelSize: 9; font.weight: Font.Black
+                        color: panel.textMuted; font.letterSpacing: 1.2
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: watchInner.implicitHeight + 24
+                        radius: 10; color: panel.surface2
+                        border.width: 1; border.color: panel.borderCol
+
+                        Column {
+                            id: watchInner
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.top: parent.top; anchors.margins: 14
+                            spacing: 12
+
+                            Label {
+                                width: parent.width
+                                text: "PeMa принимает файлы .gpx и .fit — экспортируй активность из приложения своих часов и загрузи через кнопку «Импорт» в тренировке."
+                                font.pixelSize: 11; color: panel.textPrimary; wrapMode: Text.Wrap
+                            }
+
                             Repeater {
                                 model: [
-                                    { name: "Garmin Connect",  icon: "⌚", color: "#00AAFF", hint: "Activities → выбери тренировку → … → Export Original" },
-                                    { name: "Apple Watch",     icon: "🍎", color: "#555",    hint: "Здоровье → Поделиться → Экспортировать данные (.zip с .gpx внутри)" },
-                                    { name: "Strava",          icon: "🏅", color: "#FC4C02", hint: "Активность → ⋯ → Экспорт GPX" },
-                                    { name: "Polar Flow",      icon: "🔵", color: "#006EFF", hint: "Тренировка → Экспорт → GPX" },
-                                    { name: "Suunto App",      icon: "🔴", color: "#C00",    hint: "Упражнение → ⋯ → Экспорт → FIT/GPX" },
+                                    { name: "Garmin Connect",  icon: "⌚", hint: "Activities → тренировка → … → Export Original" },
+                                    { name: "Apple Watch",     icon: "🍎", hint: "Здоровье → Поделиться → Экспорт данных (.zip с .gpx)" },
+                                    { name: "Strava",          icon: "🏅", hint: "Активность → ⋯ → Экспорт GPX" },
                                 ]
                                 delegate: RowLayout {
-                                    Layout.fillWidth: true; spacing: 10
+                                    width: parent.width; spacing: 10
                                     Rectangle {
                                         width: 32; height: 32; radius: 8
-                                        color: modelData.color + "20"
-                                        border.width: 1; border.color: modelData.color + "44"
+                                        color: panel.surface
+                                        border.width: 1; border.color: panel.borderCol
                                         Label { anchors.centerIn: parent; text: modelData.icon; font.pixelSize: 16 }
                                     }
-                                    ColumnLayout {
+                                    Column {
                                         Layout.fillWidth: true; spacing: 1
                                         Label { text: modelData.name; font.pixelSize: 12; font.weight: Font.DemiBold; color: panel.textPrimary }
-                                        Label { Layout.fillWidth: true; text: modelData.hint; font.pixelSize: 10; color: panel.textMuted; wrapMode: Text.Wrap }
+                                        Label { width: parent.width; text: modelData.hint; font.pixelSize: 10; color: panel.textMuted; wrapMode: Text.Wrap }
                                     }
                                 }
                             }
@@ -219,16 +299,65 @@ Item {
                     }
                 }
 
-                // ── О приложении ─────────────────────────────────────────────
-                ColumnLayout {
-                    Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
-                    spacing: 4
-                    Label { text: "О ПРИЛОЖЕНИИ"; font.pixelSize: 9; font.weight: Font.Black; color: panel.textMuted; font.letterSpacing: 1.2 }
+                Item { width: parent.width; height: 20 }
+
+                // ── О приложении ──────────────────────────────────────────────
+                Column {
+                    width: parent.width - 48; x: 24; spacing: 4
+                    Label {
+                        text: "О ПРИЛОЖЕНИИ"
+                        font.pixelSize: 9; font.weight: Font.Black
+                        color: panel.textMuted; font.letterSpacing: 1.2
+                    }
                     Label { text: "PeMa v2.0"; font.pixelSize: 13; font.weight: Font.DemiBold; color: panel.textPrimary }
-                    Label { text: "Qt 6 · FastAPI · SQLite · OpenStreetMap tiles"; font.pixelSize: 11; color: panel.textMuted }
+                    Label { text: "Qt 6 · FastAPI · SQLite · OpenStreetMap"; font.pixelSize: 11; color: panel.textMuted }
                 }
 
-                Item { height: 8 }
+                Item { width: parent.width; height: 28 }
+
+                // ── Выход ─────────────────────────────────────────────────────
+                Column {
+                    width: parent.width - 48; x: 24; spacing: 10
+                    visible: panel.isLoggedIn
+
+                    Rectangle {
+                        width: parent.width; height: 44; radius: 10
+                        color: "#fef2f2"
+                        border.width: 1; border.color: "#fecaca"
+
+                        RowLayout {
+                            anchors.fill: parent; anchors.leftMargin: 16; anchors.rightMargin: 14
+                            spacing: 12
+
+                            Label {
+                                text: "⏏"
+                                font.pixelSize: 18; color: "#ef4444"
+                            }
+                            Column {
+                                spacing: 1; Layout.fillWidth: true
+                                Label {
+                                    text: "Выйти из аккаунта"
+                                    font.pixelSize: 13; font.weight: Font.DemiBold; color: "#ef4444"
+                                }
+                                Label {
+                                    text: "Вы вернётесь на экран входа"
+                                    font.pixelSize: 10; color: "#f87171"
+                                }
+                            }
+                            Label {
+                                text: "›"
+                                font.pixelSize: 18; color: "#ef4444"; opacity: 0.6
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                            onClicked: panel.logoutRequested()
+                        }
+                    }
+                }
+
+                Item { width: parent.width; height: 24 }
             }
         }
     }

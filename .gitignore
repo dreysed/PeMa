@@ -1,6 +1,6 @@
 # Build output
-build-local/
 build/
+build-local/
 *.o
 *.a
 *.so
@@ -20,6 +20,7 @@ venv/
 
 # macOS
 .DS_Store
+*.DS_Store
 
 # Qt
 *.user
@@ -30,5 +31,9 @@ venv/
 .vscode/
 *.swp
 
-# Old name
+# Claude internal
+.claude/
+
+# Old / unused
 SportCal.command
+web/

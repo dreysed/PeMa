@@ -1249,33 +1249,86 @@ def get_analytics(
         GoalDB.completed_at.is_(None),
     ).order_by(GoalDB.target_date).all()
 
+    # For goal progress we need ALL workouts regardless of the period filter
+    all_athlete_workouts = db.query(WorkoutDB).filter(
+        WorkoutDB.athlete_id == athlete_id
+    ).all()
+    all_done = [w for w in all_athlete_workouts if w.status == "done"]
+
     active_goals = []
     for g in goals:
         try:
             tgt = Date.fromisoformat(g.target_date)
             days_left = (tgt - today).days
         except Exception:
+            tgt = today
             days_left = None
 
+        try:
+            goal_created = Date.fromisoformat(g.created_at[:10])
+        except Exception:
+            goal_created = today
+
+        # Workouts since goal was created
+        done_since = [w for w in all_done
+                      if Date.fromisoformat(w.date) >= goal_created]
+
         progress = 0.0
-        if g.type == "volume" and g.target_value:
+        progress_label = "авто 50/50"
+        actual_value = None
+
+        if g.target_value:
+            unit = (g.target_unit or "km").lower()
+            if unit == "km":
+                actual = round(sum(_effective_distance(w) for w in done_since), 1)
+                progress = min(1.0, round(actual / g.target_value, 3))
+                actual_value = actual
+                progress_label = f"{actual} / {g.target_value} км"
+            elif unit in ("min", "мин"):
+                actual = sum(_effective_duration(w) for w in done_since)
+                progress = min(1.0, round(actual / g.target_value, 3))
+                actual_value = actual
+                tv = int(g.target_value)
+                progress_label = f"{actual} / {tv} мин"
+            elif unit == "runs":
+                actual = len(done_since)
+                progress = min(1.0, round(actual / g.target_value, 3))
+                actual_value = actual
+                tv = int(g.target_value)
+                progress_label = f"{actual} / {tv} пробежек"
+            else:
+                actual = round(sum(_effective_distance(w) for w in done_since), 1)
+                progress = min(1.0, round(actual / g.target_value, 3))
+                actual_value = actual
+                progress_label = f"{actual} / {g.target_value}"
+        else:
+            # Combo 50/50: temporal progress + workout completion rate
             try:
-                created = Date.fromisoformat(g.created_at[:10])
+                total_days = max(1, (tgt - goal_created).days)
+                elapsed = max(0, (today - goal_created).days)
+                temporal_p = min(1.0, elapsed / total_days)
             except Exception:
-                created = today
-            done_in_window = [w for w in done if Date.fromisoformat(w.date) >= created]
-            progressed = sum(_effective_distance(w) for w in done_in_window)
-            progress = min(1.0, round(progressed / g.target_value, 3))
+                temporal_p = 0.0
+
+            all_since = [w for w in all_athlete_workouts
+                         if Date.fromisoformat(w.date) >= goal_created]
+            done_cnt = len([w for w in all_since if w.status == "done"])
+            total_cnt = len(all_since)
+            workout_p = done_cnt / total_cnt if total_cnt > 0 else temporal_p
+            progress = round((temporal_p + workout_p) / 2, 3)
+            progress_label = "авто 50/50"
 
         active_goals.append({
-            "id": g.id,
-            "title": g.title,
-            "targetDate": g.target_date,
-            "type": g.type,
-            "targetValue": g.target_value,
-            "targetUnit": g.target_unit,
-            "daysLeft": days_left,
-            "progress": progress,
+            "id":            g.id,
+            "title":         g.title,
+            "targetDate":    g.target_date,
+            "type":          g.type,
+            "targetValue":   g.target_value,
+            "targetUnit":    g.target_unit,
+            "daysLeft":      days_left,
+            "progress":      progress,
+            "actualValue":   actual_value,
+            "progressLabel": progress_label,
         })
 
     return {
@@ -1491,18 +1544,28 @@ def _generate_one_route(lat: float, lon: float, target_km: float,
     """Build and persist a single randomised circular route. Called N times per request."""
     import math, random, httpx
 
-    n_points  = random.randint(3, 4)
+    n_points  = random.randint(3, 5)
     radius_km = target_km / (2 * math.pi)
-    dlat = radius_km / 111.0
-    dlon = radius_km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+
+    # Elliptical distortion: stretch one axis to create variety
+    # (x_stretch, y_stretch) sum kept near 2 so total perimeter ≈ target
+    x_stretch = random.uniform(0.55, 1.55)
+    y_stretch  = random.uniform(0.55, 1.55)
+
+    dlat = radius_km * y_stretch / 111.0
+    dlon = radius_km * x_stretch / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+
+    # Non-uniform angular spacing — more organic shape
+    raw_angles = sorted(random.uniform(0, 2 * math.pi) for _ in range(n_points))
+    # Ensure minimum separation so waypoints aren't too close together
     start_angle = random.uniform(0, 2 * math.pi)
 
     waypoints: list = [[lon, lat]]
-    for i in range(1, n_points + 1):
-        angle   = start_angle + 2 * math.pi * i / n_points
-        perturb = random.uniform(0.75, 1.25)
-        waypoints.append([lon + dlon * perturb * math.cos(angle),
-                           lat + dlat * perturb * math.sin(angle)])
+    for i, ang in enumerate(raw_angles):
+        perturb = random.uniform(0.55, 1.55)   # wider radius variation
+        a = start_angle + ang
+        waypoints.append([lon + dlon * perturb * math.cos(a),
+                           lat + dlat * perturb * math.sin(a)])
     waypoints.append([lon, lat])
 
     coords_str    = ";".join(f"{p[0]},{p[1]}" for p in waypoints)

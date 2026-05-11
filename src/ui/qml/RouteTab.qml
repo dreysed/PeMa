@@ -25,29 +25,26 @@ Item {
     property var    selectedRoute:  null
 
     // ── Generation-batch tracking ─────────────────────────────────────────────
-    // After each generation we mark the newest N routes as "варианты"
-    property int  _batchSize:       0     // how many fresh routes to highlight
-    property bool _wasGenerating:   false // flag: generation was in progress
+    property int  _batchSize:       0
+    property bool _wasGenerating:   false
 
     onIsBusyChanged: {
         if (routeTab.isBusy) {
             routeTab._wasGenerating = true
         } else if (routeTab._wasGenerating) {
             routeTab._wasGenerating = false
-            routeTab._batchSize = 3   // newest 3 are the fresh variants
-            // Auto-select the first new route so the map updates immediately
+            routeTab._batchSize = routeTab.genCount
             if (routeTab.routesModel.length > 0)
                 routeTab.selectedRoute = routeTab.routesModel[0]
         }
     }
     onRoutesModelChanged: {
-        // If a fresh batch just arrived, refresh auto-selection
         if (routeTab._batchSize > 0 && routeTab.routesModel.length > 0)
             routeTab.selectedRoute = routeTab.routesModel[0]
     }
 
     // ── Signals ───────────────────────────────────────────────────────────────
-    signal generateRequested(real lat, real lon, real distKm, string prefs)
+    signal generateRequested(real lat, real lon, real distKm, string prefs, int count)
     signal deleteRouteRequested(string id)
     signal buildFromWaypointsRequested(var waypoints, string name)
     signal connectStravaRequested()
@@ -55,12 +52,11 @@ Item {
     signal syncStravaRequested()
     signal openStravaSettingsRequested()
 
-    // ── Location (set via IP geolocation on load) ─────────────────────────────
+    // ── Location ──────────────────────────────────────────────────────────────
     property real defaultLat: 55.7558
     property real defaultLon: 37.6173
 
     Component.onCompleted: {
-        // Fetch approximate location from IP
         var xhr = new XMLHttpRequest()
         xhr.open("GET", "https://ipapi.co/json/")
         xhr.onreadystatechange = function() {
@@ -82,15 +78,14 @@ Item {
     property real   genLon:   defaultLon
     property real   genDist:  5.0
     property string genPrefs: ""
+    property int    genCount: 3
 
     onDefaultLatChanged: genLat = defaultLat
     onDefaultLonChanged: genLon = defaultLon
 
     // ── GPX clipboard export ──────────────────────────────────────────────────
-    // QML has no direct file-write API, so we copy GPX text to clipboard
-    // via the well-known hidden TextEdit trick.
     TextEdit { id: clipHelper; visible: false; focus: false }
-    Timer    { id: gpxToast;   interval: 2000 }   // brief "Скопировано!" feedback
+    Timer    { id: gpxToast;   interval: 2000 }
 
     function copyRouteAsGpx() {
         if (!routeTab.selectedRoute || !routeTab.selectedRoute.geojson) return
@@ -160,28 +155,37 @@ Item {
 
         // ── Left sidebar ──────────────────────────────────────────────────────
         Rectangle {
+            id: sidebar
             Layout.preferredWidth: 300
             Layout.fillHeight: true
             color: surface
 
+            // Right border
             Rectangle {
-                anchors { top: parent.top; right: parent.right; bottom: parent.bottom }
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
                 width: 1; color: borderCol
             }
 
             ScrollView {
+                id: sidebarScroll
                 anchors.fill: parent
                 contentWidth: availableWidth
+                clip: true
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
 
-                ColumnLayout {
-                    width: parent.width; spacing: 0
+                // Single Column — width always equals the scroll viewport
+                Column {
+                    width: sidebarScroll.availableWidth
+                    spacing: 0
 
-                    // Header
+                    // ── Header ────────────────────────────────────────────────
                     Rectangle {
-                        Layout.fillWidth: true; height: 56; color: "transparent"
+                        width: parent.width; height: 56; color: "transparent"
                         RowLayout {
-                            anchors { fill: parent; leftMargin: 20; rightMargin: 16 }
+                            anchors.fill: parent
+                            anchors.leftMargin: 20; anchors.rightMargin: 16
                             Label {
                                 text: "Маршруты"
                                 font.pixelSize: 17; font.weight: Font.Black
@@ -190,98 +194,99 @@ Item {
                             }
                         }
                     }
-                    Rectangle { Layout.fillWidth: true; height: 1; color: borderCol }
+                    Rectangle { width: parent.width; height: 1; color: borderCol }
 
                     // ── Strava section ─────────────────────────────────────────
-                    ColumnLayout {
-                        Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20
-                        Layout.topMargin: 16; spacing: 8
+                    Item { width: parent.width; height: 16 }
 
-                        Label {
-                            text: "STRAVA"
-                            font.pixelSize: 9; font.weight: Font.Black
-                            color: textMuted; font.letterSpacing: 1.2
-                        }
+                    Rectangle {
+                        width: parent.width - 40
+                        x: 20
+                        height: stravaBlock.implicitHeight + 16
+                        radius: 10; color: surface2
+                        border.width: 1; border.color: borderCol
 
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: stravaInner.implicitHeight + 20
-                            radius: 10; color: surface2
-                            border.width: 1; border.color: borderCol
+                        Column {
+                            id: stravaBlock
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: 12
+                            spacing: 8
 
-                            ColumnLayout {
-                                id: stravaInner
-                                anchors { fill: parent; margins: 12 }
-                                spacing: 8
+                            Label {
+                                text: "STRAVA"
+                                font.pixelSize: 9; font.weight: Font.Black
+                                color: textMuted; font.letterSpacing: 1.2
+                            }
 
-                                RowLayout {
-                                    Layout.fillWidth: true
-                                    Label {
-                                        text: routeTab.stravaConnected ? "Подключено" : "Не подключено"
-                                        font.pixelSize: 12; font.weight: Font.DemiBold
-                                        color: routeTab.stravaConnected ? runColor : textMuted
-                                        Layout.fillWidth: true
-                                    }
-                                    // Status dot
-                                    Rectangle {
-                                        width: 8; height: 8; radius: 4
-                                        color: routeTab.stravaConnected ? runColor : borderCol
-                                    }
-                                }
-
+                            RowLayout {
+                                width: parent.width
                                 Label {
+                                    text: routeTab.stravaConnected ? "Подключено" : "Не подключено"
+                                    font.pixelSize: 12; font.weight: Font.DemiBold
+                                    color: routeTab.stravaConnected ? runColor : textMuted
                                     Layout.fillWidth: true
-                                    text: routeTab.stravaConnected
-                                        ? "Активности синхронизируются автоматически"
-                                        : "Подключите аккаунт чтобы тренировки загружались сами"
-                                    font.pixelSize: 10; color: textMuted; wrapMode: Text.Wrap
                                 }
+                                Rectangle {
+                                    width: 8; height: 8; radius: 4
+                                    color: routeTab.stravaConnected ? runColor : borderCol
+                                }
+                            }
 
-                                RowLayout {
-                                    spacing: 6
-                                    Rectangle {
-                                        height: 28; width: stravaBtn.implicitWidth + 18; radius: 7
-                                        color: routeTab.stravaConnected ? surface : "#FC4C02"
-                                        border.width: routeTab.stravaConnected ? 1 : 0
-                                        border.color: borderCol
-                                        Label {
-                                            id: stravaBtn
-                                            anchors.centerIn: parent
-                                            text: routeTab.stravaConnected ? "Отключить" : "Подключить Strava"
-                                            font.pixelSize: 11; font.weight: Font.DemiBold
-                                            color: routeTab.stravaConnected ? textMuted : "#fff"
-                                        }
-                                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                if (routeTab.stravaConnected)
-                                                    routeTab.disconnectStravaRequested()
-                                                else if (!routeTab.stravaHasClientId)
-                                                    routeTab.openStravaSettingsRequested()
-                                                else
-                                                    routeTab.connectStravaRequested()
-                                            }
+                            Label {
+                                width: parent.width
+                                text: routeTab.stravaConnected
+                                    ? "Активности синхронизируются автоматически"
+                                    : "Подключите аккаунт чтобы тренировки загружались сами"
+                                font.pixelSize: 10; color: textMuted; wrapMode: Text.Wrap
+                            }
+
+                            Row {
+                                spacing: 6
+                                Rectangle {
+                                    height: 28; width: stravaBtn.implicitWidth + 18; radius: 7
+                                    color: routeTab.stravaConnected ? surface : "#FC4C02"
+                                    border.width: routeTab.stravaConnected ? 1 : 0
+                                    border.color: borderCol
+                                    Label {
+                                        id: stravaBtn; anchors.centerIn: parent
+                                        text: routeTab.stravaConnected ? "Отключить" : "Подключить Strava"
+                                        font.pixelSize: 11; font.weight: Font.DemiBold
+                                        color: routeTab.stravaConnected ? textMuted : "#fff"
+                                    }
+                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            if (routeTab.stravaConnected)
+                                                routeTab.disconnectStravaRequested()
+                                            else if (!routeTab.stravaHasClientId)
+                                                routeTab.openStravaSettingsRequested()
+                                            else
+                                                routeTab.connectStravaRequested()
                                         }
                                     }
-                                    Rectangle {
-                                        visible: routeTab.stravaConnected
-                                        height: 28; width: syncLbl.implicitWidth + 18; radius: 7
-                                        color: surface2; border.width: 1; border.color: borderCol
-                                        Label {
-                                            id: syncLbl; anchors.centerIn: parent
-                                            text: "Синхронизировать"; font.pixelSize: 11; color: accent
-                                        }
-                                        MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                            onClicked: routeTab.syncStravaRequested() }
+                                }
+                                Rectangle {
+                                    visible: routeTab.stravaConnected
+                                    height: 28; width: syncLbl.implicitWidth + 18; radius: 7
+                                    color: surface2; border.width: 1; border.color: borderCol
+                                    Label {
+                                        id: syncLbl; anchors.centerIn: parent
+                                        text: "Синхронизировать"; font.pixelSize: 11; color: accent
                                     }
+                                    MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                        onClicked: routeTab.syncStravaRequested() }
                                 }
                             }
                         }
                     }
 
                     // ── Generate form ──────────────────────────────────────────
-                    ColumnLayout {
-                        Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20
-                        Layout.topMargin: 16; spacing: 8
+                    Item { width: parent.width; height: 16 }
+
+                    Column {
+                        width: parent.width - 40
+                        x: 20
+                        spacing: 8
 
                         Label {
                             text: "СГЕНЕРИРОВАТЬ"
@@ -290,33 +295,41 @@ Item {
                         }
 
                         Rectangle {
-                            Layout.fillWidth: true
-                            height: genInner.implicitHeight + 20
+                            width: parent.width
+                            height: genInner.implicitHeight + 24
                             radius: 10; color: surface2
                             border.width: 1; border.color: borderCol
 
-                            ColumnLayout {
+                            Column {
                                 id: genInner
-                                anchors { fill: parent; margins: 12 }
-                                spacing: 10
+                                anchors.left: parent.left; anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: 14
+                                spacing: 12
 
-                                // City search
-                                ColumnLayout {
-                                    Layout.fillWidth: true; spacing: 4
-                                    Label { text: "Город старта"; font.pixelSize: 10; color: textMuted }
+                                // City / district / park search
+                                Column {
+                                    width: parent.width; spacing: 4
+
+                                    Label {
+                                        text: "Место (район, парк, улица, город)"
+                                        font.pixelSize: 10; color: textMuted
+                                    }
+
                                     RowLayout {
-                                        Layout.fillWidth: true; spacing: 6
+                                        width: parent.width; spacing: 6
                                         TextField {
                                             id: cityField
-                                            Layout.fillWidth: true; implicitHeight: 32; font.pixelSize: 12
-                                            placeholderText: "Москва, Казань, Сочи..."
+                                            Layout.fillWidth: true; implicitHeight: 34
+                                            font.pixelSize: 12
+                                            placeholderText: "Сокольники Москва · Парк Горького · Казань..."
                                             onAccepted: {
                                                 cityStatusLabel.text = "Ищу…"
                                                 routeTab.searchCity(cityField.text)
                                             }
                                         }
                                         Rectangle {
-                                            width: 32; height: 32; radius: 8; color: accent
+                                            width: 34; height: 34; radius: 8; color: accent
                                             Label { anchors.centerIn: parent; text: "→"; font.pixelSize: 15; color: "#fff"; font.weight: Font.DemiBold }
                                             MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                                 onClicked: {
@@ -326,22 +339,22 @@ Item {
                                             }
                                         }
                                     }
+
                                     Label {
                                         id: cityStatusLabel
-                                        Layout.fillWidth: true
-                                        text: ""
-                                        visible: text !== ""
+                                        width: parent.width
+                                        text: ""; visible: text !== ""
                                         font.pixelSize: 10; color: textMuted; wrapMode: Text.Wrap
-                                        elide: Text.ElideRight
-                                        maximumLineCount: 1
+                                        elide: Text.ElideRight; maximumLineCount: 1
                                     }
                                 }
 
-                                // Distance slider
-                                ColumnLayout {
-                                    Layout.fillWidth: true; spacing: 2
+                                // Distance
+                                Column {
+                                    width: parent.width; spacing: 2
+
                                     RowLayout {
-                                        Layout.fillWidth: true
+                                        width: parent.width
                                         Label { text: "Длина"; font.pixelSize: 10; color: textMuted }
                                         Item { Layout.fillWidth: true }
                                         Label {
@@ -350,7 +363,7 @@ Item {
                                         }
                                     }
                                     Slider {
-                                        Layout.fillWidth: true; from: 1; to: 42; stepSize: 0.5
+                                        width: parent.width; from: 1; to: 42; stepSize: 0.5
                                         value: routeTab.genDist
                                         onValueChanged: routeTab.genDist = value
                                     }
@@ -358,73 +371,137 @@ Item {
 
                                 // Preferences
                                 TextField {
-                                    Layout.fillWidth: true; implicitHeight: 32; font.pixelSize: 12
+                                    width: parent.width; implicitHeight: 34; font.pixelSize: 12
                                     placeholderText: "парки, набережная, тихие улицы..."
                                     onTextChanged: routeTab.genPrefs = text
                                 }
 
-                                // Generate button — single Label anchored to centre (no layout shift)
+                                // Count selector
+                                Column {
+                                    width: parent.width; spacing: 6
+
+                                    Label {
+                                        text: "ВАРИАНТОВ МАРШРУТА"
+                                        font.pixelSize: 9; font.weight: Font.Black
+                                        color: textMuted; font.letterSpacing: 1.2
+                                    }
+
+                                    Row {
+                                        width: parent.width
+                                        spacing: (width - 5 * 40) / 4
+                                        Repeater {
+                                            model: [1, 2, 3, 4, 5]
+                                            Rectangle {
+                                                width: 40; height: 32; radius: 8
+                                                color: routeTab.genCount === modelData ? accent : surface
+                                                border.width: 1
+                                                border.color: routeTab.genCount === modelData ? accent : borderCol
+                                                Label {
+                                                    anchors.centerIn: parent; text: modelData
+                                                    font.pixelSize: 13; font.weight: Font.DemiBold
+                                                    color: routeTab.genCount === modelData ? "#fff" : textMuted
+                                                }
+                                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                                    onClicked: routeTab.genCount = modelData }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Generate button
                                 Rectangle {
-                                    Layout.fillWidth: true; height: 34; radius: 8
+                                    width: parent.width; height: 36; radius: 8
                                     color: routeTab.isBusy ? borderCol : accent
                                     opacity: routeTab.isBusy ? 0.7 : 1.0
                                     Label {
                                         anchors.centerIn: parent
-                                        text: routeTab.isBusy ? "Строю маршрут…" : "Сгенерировать"
-                                        font.pixelSize: 12; font.weight: Font.DemiBold; color: "#fff"
+                                        text: routeTab.isBusy ? "Строю маршруты…" : "Сгенерировать"
+                                        font.pixelSize: 13; font.weight: Font.DemiBold; color: "#fff"
                                     }
                                     MouseArea {
-                                        anchors.fill: parent; enabled: !routeTab.isBusy; cursorShape: Qt.PointingHandCursor
-                                        onClicked: routeTab.generateRequested(routeTab.genLat, routeTab.genLon, routeTab.genDist, routeTab.genPrefs)
+                                        anchors.fill: parent
+                                        enabled: !routeTab.isBusy
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: routeTab.generateRequested(
+                                            routeTab.genLat, routeTab.genLon,
+                                            routeTab.genDist, routeTab.genPrefs, routeTab.genCount)
                                     }
                                 }
                             }
                         }
                     }
 
-                    // ── Route list (variants + saved) ─────────────────────────
-                    ColumnLayout {
-                        Layout.fillWidth: true; Layout.topMargin: 16; spacing: 0
+                    // ── Route list ─────────────────────────────────────────────
+                    Item { width: parent.width; height: 16 }
 
-                        // ── "НОВЫЕ ВАРИАНТЫ" header — shown after generation ────
+                    // "НОВЫЕ ВАРИАНТЫ" header
+                    Item {
+                        width: parent.width
+                        height: newVariantsHeader.visible ? newVariantsHeader.height : 0
+                        visible: routeTab._batchSize > 0 && routeTab.routesModel.length > 0
+
                         RowLayout {
-                            visible: routeTab._batchSize > 0 && routeTab.routesModel.length > 0
-                            Layout.leftMargin: 20; Layout.rightMargin: 20; Layout.fillWidth: true
+                            id: newVariantsHeader
+                            anchors.left: parent.left; anchors.right: parent.right
+                            anchors.leftMargin: 20; anchors.rightMargin: 20
                             Label {
                                 text: "НОВЫЕ ВАРИАНТЫ"
                                 font.pixelSize: 9; font.weight: Font.Black
                                 color: accent; font.letterSpacing: 1.2
                             }
                             Item { Layout.fillWidth: true }
-                            // Dismiss variants highlight
                             Label {
-                                text: "скрыть"
-                                font.pixelSize: 9; color: textMuted
+                                text: "скрыть"; font.pixelSize: 9; color: textMuted
                                 MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                     onClicked: routeTab._batchSize = 0 }
                             }
                         }
+                    }
+                    Item {
+                        width: parent.width; height: 4
+                        visible: routeTab._batchSize > 0 && routeTab.routesModel.length > 0
+                    }
 
-                        Item { height: 4; visible: routeTab._batchSize > 0 && routeTab.routesModel.length > 0 }
+                    // Route list header when no batch
+                    Item {
+                        width: parent.width; height: savedHeader.implicitHeight
+                        visible: routeTab._batchSize === 0 && routeTab.routesModel.length > 0
+                        Label {
+                            id: savedHeader
+                            anchors.left: parent.left; anchors.leftMargin: 20
+                            text: "СОХРАНЁННЫЕ"
+                            font.pixelSize: 9; font.weight: Font.Black
+                            color: textMuted; font.letterSpacing: 1.2
+                        }
+                    }
+                    Item {
+                        width: parent.width; height: 4
+                        visible: routeTab._batchSize === 0 && routeTab.routesModel.length > 0
+                    }
 
-                        Repeater {
-                            model: routeTab.routesModel
-                            delegate: Rectangle {
-                                id: routeDelegate
-                                property bool isNew: index < routeTab._batchSize
-                                property bool isSelected: routeTab.selectedRoute
-                                                          && routeTab.selectedRoute.id === modelData.id
+                    // Route delegates via Repeater inside Column
+                    Repeater {
+                        model: routeTab.routesModel
+                        delegate: Item {
+                            id: routeDelegate
+                            property bool isNew: index < routeTab._batchSize
+                            property bool isSelected: routeTab.selectedRoute !== null
+                                                      && routeTab.selectedRoute.id === modelData.id
 
-                                width: parent.width
-                                height: isNew ? 72 : 64
+                            width: sidebarScroll.availableWidth
+                            height: 64
 
+                            Rectangle {
+                                anchors.fill: parent
                                 color: isSelected
                                        ? (dark ? "#16123a" : "#f5f3ff")
                                        : isNew ? (dark ? "#1a1a2e" : "#fafafe") : "transparent"
 
-                                // Left accent bar — thicker + brighter for new variants
+                                // Left accent bar
                                 Rectangle {
-                                    anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 0 }
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
                                     width: isNew ? 4 : 3
                                     color: isNew ? accent : (isSelected ? accent : borderCol)
                                     opacity: isNew ? 1 : (isSelected ? 0.8 : 0)
@@ -432,25 +509,28 @@ Item {
 
                                 // Bottom separator
                                 Rectangle {
-                                    anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 20; rightMargin: 20 }
-                                    height: 1; color: borderCol; opacity: 0.6
+                                    anchors.left: parent.left; anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: 20; anchors.rightMargin: 20
+                                    height: 1; color: borderCol; opacity: 0.5
                                 }
 
                                 RowLayout {
-                                    anchors { fill: parent; leftMargin: 20; rightMargin: 14 }
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 20; anchors.rightMargin: 14
                                     spacing: 10
 
                                     ColumnLayout {
-                                        Layout.fillWidth: true; spacing: 2
+                                        Layout.fillWidth: true; spacing: 3
+
                                         RowLayout {
-                                            spacing: 6
+                                            spacing: 6; Layout.fillWidth: true
                                             Label {
                                                 text: modelData.name || "Маршрут"
                                                 font.pixelSize: 13; font.weight: Font.DemiBold
                                                 color: textPrimary; elide: Text.ElideRight
                                                 Layout.fillWidth: true
                                             }
-                                            // "НОВЫЙ" badge on fresh variants
                                             Rectangle {
                                                 visible: isNew
                                                 height: 16; width: newBadgeLbl.implicitWidth + 8; radius: 4
@@ -463,9 +543,11 @@ Item {
                                                 }
                                             }
                                         }
+
                                         Label {
                                             text: (modelData.distanceKm || 0).toFixed(1) + " км"
-                                                  + (modelData.description && !isNew ? "  ·  " + modelData.description : "")
+                                                  + (modelData.description && !isNew
+                                                     ? "  ·  " + modelData.description : "")
                                             font.pixelSize: 11; color: textMuted
                                             elide: Text.ElideRight; Layout.fillWidth: true
                                         }
@@ -478,60 +560,61 @@ Item {
                                         Label { anchors.centerIn: parent; text: "×"; font.pixelSize: 14; color: textMuted }
                                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                                             onClicked: {
-                                                if (routeTab._batchSize > 0) routeTab._batchSize = Math.max(0, routeTab._batchSize - 1)
+                                                if (routeTab._batchSize > 0)
+                                                    routeTab._batchSize = Math.max(0, routeTab._batchSize - 1)
                                                 routeTab.deleteRouteRequested(modelData.id)
                                             }
                                         }
                                     }
                                 }
-                                MouseArea { anchors.fill: parent; z: -1; cursorShape: Qt.PointingHandCursor
-                                    onClicked: routeTab.selectedRoute = modelData }
+
+                                MouseArea {
+                                    anchors.fill: parent; z: -1
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: routeTab.selectedRoute = modelData
+                                }
                             }
                         }
+                    }
 
-                        // Separator between variants and older routes
-                        Rectangle {
-                            visible: routeTab._batchSize > 0 && routeTab.routesModel.length > routeTab._batchSize
-                            Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20
-                            Layout.topMargin: 8; height: 1; color: borderCol
-                        }
+                    // Separator between variants and older routes
+                    Rectangle {
+                        visible: routeTab._batchSize > 0 && routeTab.routesModel.length > routeTab._batchSize
+                        width: parent.width - 40; x: 20
+                        height: 1; color: borderCol
+                    }
+                    Item {
+                        visible: routeTab._batchSize > 0 && routeTab.routesModel.length > routeTab._batchSize
+                        width: parent.width; height: 6
                         Label {
-                            visible: routeTab._batchSize > 0 && routeTab.routesModel.length > routeTab._batchSize
-                            Layout.leftMargin: 20; Layout.topMargin: 6
+                            anchors.left: parent.left; anchors.leftMargin: 20
+                            anchors.verticalCenter: parent.verticalCenter
                             text: "РАНЕЕ СОХРАНЁННЫЕ"
                             font.pixelSize: 9; font.weight: Font.Black
                             color: textMuted; font.letterSpacing: 1.2
                         }
-                        Item { height: 4; visible: routeTab._batchSize > 0 }
+                    }
 
-                        // Header when no batch
+                    // Empty state
+                    Item {
+                        width: parent.width; height: 60
+                        visible: routeTab.routesModel.length === 0
                         Label {
-                            visible: routeTab._batchSize === 0 && routeTab.routesModel.length > 0
-                            Layout.leftMargin: 20
-                            text: "СОХРАНЁННЫЕ"
-                            font.pixelSize: 9; font.weight: Font.Black
-                            color: textMuted; font.letterSpacing: 1.2
-                        }
-                        Item { height: 4; visible: routeTab._batchSize === 0 && routeTab.routesModel.length > 0 }
-
-                        Label {
-                            Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 20
-                            visible: routeTab.routesModel.length === 0
+                            anchors.centerIn: parent
                             text: "Маршрутов пока нет"
                             font.pixelSize: 12; color: textMuted
                         }
-
-                        Item { height: 16 }
                     }
+
+                    Item { width: parent.width; height: 20 }
                 }
             }
         }
 
-        // ── Right: always-visible map + toolbar ───────────────────────────────
+        // ── Right: map + toolbar ──────────────────────────────────────────────
         Item {
             Layout.fillWidth: true; Layout.fillHeight: true
 
-            // The map always covers the full right area
             TileMap {
                 id: theMap
                 anchors.fill: parent
@@ -546,17 +629,19 @@ Item {
                              : routeTab.genLon
             }
 
-            // ── Route info overlay (shown when route selected) ────────────────
+            // ── Route info overlay ────────────────────────────────────────────
             Rectangle {
                 visible: !!routeTab.selectedRoute
-                anchors { top: parent.top; left: parent.left; right: parent.right; margins: 12 }
+                anchors.top: parent.top
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.margins: 12
                 height: routeInfoRow.implicitHeight + 20
                 radius: 10; color: surface + "ee"
                 border.width: 1; border.color: borderCol
 
                 RowLayout {
                     id: routeInfoRow
-                    anchors { fill: parent; margins: 12 }
+                    anchors.fill: parent; anchors.margins: 12
                     spacing: 12
 
                     ColumnLayout {
@@ -567,14 +652,14 @@ Item {
                         }
                         Label {
                             text: routeTab.selectedRoute
-                                  ? ((routeTab.selectedRoute.distanceKm || 0).toFixed(1) + " км  ·  " + (routeTab.selectedRoute.description || ""))
+                                  ? ((routeTab.selectedRoute.distanceKm || 0).toFixed(1)
+                                     + " км  ·  " + (routeTab.selectedRoute.description || ""))
                                   : ""
                             font.pixelSize: 11; color: textMuted; elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
                     }
 
-                    // Copy route as GPX to clipboard
                     Rectangle {
                         height: 30; width: gpxLbl.implicitWidth + 16; radius: 7
                         color: gpxToast.running ? routeTab.runColor : routeTab.surface2
@@ -589,7 +674,6 @@ Item {
                             onClicked: routeTab.copyRouteAsGpx() }
                     }
 
-                    // Edit existing route — sample GeoJSON into edit waypoints
                     Rectangle {
                         height: 30; width: editRtLbl.implicitWidth + 16; radius: 7
                         color: surface2; border.width: 1; border.color: borderCol
@@ -601,7 +685,6 @@ Item {
                                     var geo = JSON.parse(routeTab.selectedRoute.geojson)
                                     var coords = geo.coordinates || []
                                     if (coords.length < 2) return
-                                    // Sample ~10 evenly-spaced waypoints from the stored LineString
                                     var wps = []
                                     var n = Math.min(10, coords.length)
                                     for (var i = 0; i < n; i++) {
@@ -610,13 +693,11 @@ Item {
                                     }
                                     theMap.editWaypoints = wps
                                     theMap.editMode = true
-                                    // onEditWaypointsChanged in TileMap handles repaint
                                 } catch(ex) {}
                             }
                         }
                     }
 
-                    // Close selection
                     Rectangle {
                         width: 30; height: 30; radius: 7
                         color: surface2; border.width: 1; border.color: borderCol
@@ -629,17 +710,18 @@ Item {
 
             // ── Edit toolbar (bottom of map) ──────────────────────────────────
             Rectangle {
-                anchors { bottom: parent.bottom; left: parent.left; right: parent.right; margins: 12 }
+                anchors.bottom: parent.bottom
+                anchors.left: parent.left; anchors.right: parent.right
+                anchors.margins: 12
                 height: toolbarRow.implicitHeight + 16
                 radius: 10; color: surface + "f0"
                 border.width: 1; border.color: borderCol
 
                 RowLayout {
                     id: toolbarRow
-                    anchors { fill: parent; margins: 10 }
+                    anchors.fill: parent; anchors.margins: 10
                     spacing: 8
 
-                    // Draw mode toggle
                     Rectangle {
                         height: 34; width: drawLbl.implicitWidth + 18; radius: 8
                         color: theMap.editMode ? accent : surface2
@@ -654,7 +736,6 @@ Item {
                             onClicked: theMap.editMode = !theMap.editMode }
                     }
 
-                    // Undo last point
                     Rectangle {
                         visible: theMap.editMode && theMap.editWaypoints.length > 0
                         height: 34; width: undoLbl.implicitWidth + 18; radius: 8
@@ -664,7 +745,6 @@ Item {
                             onClicked: theMap.removeLastWaypoint() }
                     }
 
-                    // Clear all
                     Rectangle {
                         visible: theMap.editMode && theMap.editWaypoints.length > 0
                         height: 34; width: clearLbl.implicitWidth + 18; radius: 8
@@ -676,7 +756,6 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
-                    // Build route from waypoints
                     Rectangle {
                         visible: theMap.editWaypoints.length >= 2
                         height: 34; width: buildLbl.implicitWidth + 18; radius: 8
@@ -701,7 +780,6 @@ Item {
                         }
                     }
 
-                    // Hint when not editing
                     Label {
                         visible: !theMap.editMode
                         text: "Прокрутка для зума · Перетаскивание для перемещения"

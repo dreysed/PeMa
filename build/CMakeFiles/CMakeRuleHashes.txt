@@ -1,6 +1,0 @@
-# Hashes of file build rules.
-b5dcde20a95cfffb029ad72c93445ccd .qt/qml_imports/QtCalendarApp_build.cmake
-8476faf27eccf71b7abed701f44c3d0d CMakeFiles/QtCalendarApp_autogen
-8476faf27eccf71b7abed701f44c3d0d CMakeFiles/QtCalendarApp_qmlimportscan
-b411ae72b8c9a567a20d5542586079e3 QtCalendarApp_autogen/3YJK5W5UP7/qrc_resources.cpp
-0a343297900428395a114527a0c77f79 QtCalendarApp_autogen/timestamp

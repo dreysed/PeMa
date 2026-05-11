@@ -1,4 +1,0 @@
-C:/qt-calendar-app/build-local/CMakeFiles/QtCalendarApp.dir
-C:/qt-calendar-app/build-local/CMakeFiles/QtCalendarApp_qmlimportscan.dir
-C:/qt-calendar-app/build-local/CMakeFiles/ALL_BUILD.dir
-C:/qt-calendar-app/build-local/CMakeFiles/ZERO_CHECK.dir
