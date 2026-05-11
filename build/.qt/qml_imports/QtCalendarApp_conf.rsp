@@ -1,9 +1,0 @@
--rootPath
-/Users/parhom/Desktop/qt-calendar-app
--cmake-output
--output-file
-/Users/parhom/Desktop/qt-calendar-app/build/.qt/qml_imports/QtCalendarApp_conf.cmake
--importPath
-/Users/parhom/Desktop/qt-calendar-app/build
--importPath
-/Users/parhom/Qt/6.10.2/macos/qml

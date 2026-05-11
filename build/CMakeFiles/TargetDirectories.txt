@@ -1,6 +1,0 @@
-/Users/parhom/Desktop/qt-calendar-app/build/CMakeFiles/QtCalendarApp.dir
-/Users/parhom/Desktop/qt-calendar-app/build/CMakeFiles/QtCalendarApp_qmlimportscan.dir
-/Users/parhom/Desktop/qt-calendar-app/build/CMakeFiles/edit_cache.dir
-/Users/parhom/Desktop/qt-calendar-app/build/CMakeFiles/rebuild_cache.dir
-/Users/parhom/Desktop/qt-calendar-app/build/CMakeFiles/QtCalendarApp_autogen_timestamp_deps.dir
-/Users/parhom/Desktop/qt-calendar-app/build/CMakeFiles/QtCalendarApp_autogen.dir
