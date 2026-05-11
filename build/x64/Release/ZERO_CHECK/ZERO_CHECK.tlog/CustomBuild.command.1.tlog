@@ -1,0 +1,10 @@
+^C:\PEMA-FIRSTVER\BUILD\CMAKEFILES\A84D84344020AFFC7155CD878C9560C2\GENERATE.STAMP.RULE
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/PeMa-firstver -BC:/PeMa-firstver/build --check-stamp-list CMakeFiles/generate.stamp.list --vs-solution-file C:/PeMa-firstver/build/PeMa.sln
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

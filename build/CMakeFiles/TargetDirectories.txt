@@ -1,0 +1,4 @@
+C:/PeMa-firstver/build/CMakeFiles/PeMa.dir
+C:/PeMa-firstver/build/CMakeFiles/PeMa_qmlimportscan.dir
+C:/PeMa-firstver/build/CMakeFiles/ALL_BUILD.dir
+C:/PeMa-firstver/build/CMakeFiles/ZERO_CHECK.dir

@@ -1,0 +1,24 @@
+^C:\PEMA-FIRSTVER\BUILD-CODEX\CMAKEFILES\AC0D1E61C8EFDD68DB171C92DE0A126B\QRC_RESOURCES.CPP.RULE
+setlocal
+cd C:\PeMa-firstver\build-codex
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+"C:\Program Files\CMake\bin\cmake.exe" -E cmake_autorcc C:/PeMa-firstver/build-codex/CMakeFiles/PeMa_autogen.dir/AutoRcc_resources_3YJK5W5UP7_Info.json Debug
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\PEMA-FIRSTVER\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/PeMa-firstver -BC:/PeMa-firstver/build-codex --check-stamp-file C:/PeMa-firstver/build-codex/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

@@ -1,0 +1,32 @@
+^C:\PEMA-FIRSTVER\BUILD\CMAKEFILES\804345B5BC0CC108CAC16AC955949BB8\PEMA_BUILD.CMAKE.RULE
+setlocal
+cd C:\PeMa-firstver
+if %errorlevel% neq 0 goto :cmEnd
+C:
+if %errorlevel% neq 0 goto :cmEnd
+call C:\PeMa-firstver\build\.qt\bin\qt_setup_tool_path.bat C:/Qt/6.10.2/msvc2022_64/bin/qmlimportscanner.exe -rootPath C:/PeMa-firstver -cmake-output -output-file C:/PeMa-firstver/build/.qt/qml_imports/PeMa_build.cmake -importPath C:/PeMa-firstver/build -importPath C:/Qt/6.10.2/msvc2022_64/qml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\PEMA-FIRSTVER\BUILD\CMAKEFILES\A84D84344020AFFC7155CD878C9560C2\PEMA_QMLIMPORTSCAN.RULE
+setlocal
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^C:\PEMA-FIRSTVER\CMAKELISTS.TXT
+setlocal
+"C:\Program Files\CMake\bin\cmake.exe" -SC:/PeMa-firstver -BC:/PeMa-firstver/build --check-stamp-file C:/PeMa-firstver/build/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
