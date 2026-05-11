@@ -577,6 +577,8 @@ void WorkoutStore::setSelectedAthleteId(const QString &id)
     fetchDayWorkouts();
     fetchAnalytics();
     fetchGoals();
+    if (m_currentUserRole == QStringLiteral("coach"))
+        fetchCoachNotesInternal(id);
 }
 
 void WorkoutStore::setCreateDialogOpen(bool open)
@@ -987,6 +989,46 @@ bool WorkoutStore::deleteGoal(const QString &id)
     fetchGoals();
     fetchAnalytics();
     return true;
+}
+
+// ─── Coach notes ─────────────────────────────────────────────────────────────
+
+void WorkoutStore::fetchCoachNotes(const QString &athleteId)
+{
+    fetchCoachNotesInternal(athleteId);
+}
+
+void WorkoutStore::fetchCoachNotesInternal(const QString &athleteId)
+{
+    if (athleteId.isEmpty()) {
+        if (!m_coachNotes.isEmpty()) {
+            m_coachNotes.clear();
+            emit coachNotesChanged();
+        }
+        return;
+    }
+    httpAsync(QStringLiteral("/api/athletes/") + athleteId + QStringLiteral("/notes"),
+              [this](const QJsonDocument &doc) {
+        if (!doc.isObject()) return;
+        const QString notes = doc.object().value(QStringLiteral("notes")).toString();
+        if (notes != m_coachNotes) {
+            m_coachNotes = notes;
+            emit coachNotesChanged();
+        }
+    });
+}
+
+void WorkoutStore::saveCoachNotes(const QString &athleteId, const QString &notes)
+{
+    if (athleteId.isEmpty()) return;
+    QJsonObject body;
+    body[QStringLiteral("notes")] = notes;
+    const auto doc = httpSync(QStringLiteral("PUT"),
+                              QStringLiteral("/api/athletes/") + athleteId + QStringLiteral("/notes"),
+                              body);
+    Q_UNUSED(doc);
+    m_coachNotes = notes;
+    emit coachNotesChanged();
 }
 
 // ─── Watch import ────────────────────────────────────────────────────────────

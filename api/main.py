@@ -89,6 +89,7 @@ class CoachAthleteLinkDB(Base):
     __tablename__ = "coach_athlete_links"
     coach_user_id = Column(String, ForeignKey("users.id"), primary_key=True)
     athlete_id = Column(String, ForeignKey("athletes.id"), primary_key=True)
+    notes = Column(Text, default="")   # coach's private notes about this athlete
 
 
 class WorkoutDB(Base):
@@ -502,6 +503,11 @@ def _migrate_schema():
             if col not in existing_u:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {sql_type}"))
 
+        # coach_athlete_links: notes column
+        existing_cal = {row[1] for row in conn.execute(text("PRAGMA table_info(coach_athlete_links)"))}
+        if "notes" not in existing_cal:
+            conn.execute(text("ALTER TABLE coach_athlete_links ADD COLUMN notes TEXT DEFAULT ''"))
+
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -629,6 +635,45 @@ def unlink_athlete(
         raise HTTPException(404, "Связь не найдена")
     db.delete(link)
     db.commit()
+
+
+# ─── Coach notes ─────────────────────────────────────────────────────────────
+
+@app.get("/api/athletes/{athlete_id}/notes")
+def get_coach_notes(
+    athlete_id: str,
+    current_user: UserDB = Depends(require_coach),
+    db: Session = Depends(get_db),
+):
+    link = db.query(CoachAthleteLinkDB).filter(
+        CoachAthleteLinkDB.coach_user_id == current_user.id,
+        CoachAthleteLinkDB.athlete_id == athlete_id,
+    ).first()
+    if not link:
+        raise HTTPException(404, "Атлет не найден")
+    return {"notes": link.notes or ""}
+
+
+class CoachNotesUpdate(BaseModel):
+    notes: str
+
+
+@app.put("/api/athletes/{athlete_id}/notes", status_code=200)
+def update_coach_notes(
+    athlete_id: str,
+    data: CoachNotesUpdate,
+    current_user: UserDB = Depends(require_coach),
+    db: Session = Depends(get_db),
+):
+    link = db.query(CoachAthleteLinkDB).filter(
+        CoachAthleteLinkDB.coach_user_id == current_user.id,
+        CoachAthleteLinkDB.athlete_id == athlete_id,
+    ).first()
+    if not link:
+        raise HTTPException(404, "Атлет не найден")
+    link.notes = data.notes
+    db.commit()
+    return {"notes": link.notes}
 
 
 # ─── Calendar ────────────────────────────────────────────────────────────────
@@ -1103,7 +1148,7 @@ def _effective_duration(w: WorkoutDB) -> int:
 @app.get("/api/analytics")
 def get_analytics(
     athlete_id: str,
-    period: str = Query("all"),       # 30d | 90d | year | all
+    period: str = Query("all"),       # 7d | 30d | 90d | year | all
     current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -1111,7 +1156,8 @@ def get_analytics(
 
     today = Date.today()
     period_start: Optional[Date] = None
-    if period == "30d":  period_start = today - timedelta(days=30)
+    if period == "7d":   period_start = today - timedelta(days=7)
+    elif period == "30d":  period_start = today - timedelta(days=30)
     elif period == "90d": period_start = today - timedelta(days=90)
     elif period == "year": period_start = today - timedelta(days=365)
 

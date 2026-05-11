@@ -39,6 +39,7 @@ class WorkoutStore : public QObject
     Q_PROPERTY(QString      analyticsPeriod        READ analyticsPeriod
                WRITE setAnalyticsPeriod            NOTIFY analyticsPeriodChanged)
     Q_PROPERTY(QVariantList goals                  READ goals                  NOTIFY goalsChanged)
+    Q_PROPERTY(QString      coachNotes             READ coachNotes             NOTIFY coachNotesChanged)
     Q_PROPERTY(QVariantList routes                 READ routes                 NOTIFY routesChanged)
     Q_PROPERTY(bool         hasOpenAiKey           READ hasOpenAiKey           NOTIFY openAiKeyChanged)
     Q_PROPERTY(bool         stravaConnected        READ stravaConnected        NOTIFY stravaStatusChanged)
@@ -80,6 +81,7 @@ public:
     QString      analyticsPeriod()     const { return m_analyticsPeriod; }
     void         setAnalyticsPeriod(const QString &p);
     QVariantList goals()               const { return m_goals; }
+    QString      coachNotes()          const { return m_coachNotes; }
     QVariantList routes()              const { return m_routes; }
     bool         hasOpenAiKey()        const { return m_hasOpenAiKey; }
     bool         stravaConnected()     const { return m_stravaConnected; }
@@ -159,6 +161,10 @@ public:
     Q_INVOKABLE void clearError();
     Q_INVOKABLE void refresh();
 
+    // ── Coach notes ───────────────────────────────────────────────────────────
+    Q_INVOKABLE void saveCoachNotes(const QString &athleteId, const QString &notes);
+    Q_INVOKABLE void fetchCoachNotes(const QString &athleteId);
+
     // ── Goals ─────────────────────────────────────────────────────────────────
     Q_INVOKABLE bool createGoal(const QString &title,
                                 const QString &targetDate,
@@ -212,6 +218,7 @@ signals:
     void analyticsChanged();
     void analyticsPeriodChanged();
     void goalsChanged();
+    void coachNotesChanged();
     void routesChanged();
     void openAiKeyChanged();
     void stravaStatusChanged();
@@ -248,6 +255,7 @@ private:
     void fetchAthletes();
     void fetchGoals();
     void fetchRoutes();
+    void fetchCoachNotesInternal(const QString &athleteId);
     void fetchOpenAiKeyStatus();
     void fetchStravaStatus();
 
@@ -280,6 +288,7 @@ private:
     QVariantMap  m_analyticsSummary;
     QString      m_analyticsPeriod = QStringLiteral("all");
     QVariantList m_goals;
+    QString      m_coachNotes;
     QVariantList m_routes;
     bool         m_hasOpenAiKey = false;
     bool         m_stravaConnected   = false;

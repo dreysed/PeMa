@@ -21,10 +21,14 @@ Dialog {
     signal goalCreated(string title, string targetDate, string type,
                        real targetValue, string targetUnit)
 
+    // Set this before open() to pre-fill the date (e.g. from calendar click)
+    property string prefillDate: ""
+
     onOpened: {
         goalTitleField.text    = ""
-        goalDateField.text     = Qt.formatDate(new Date(), "yyyy-MM-dd")
-        goalTypeCombo.currentIndex = 0
+        goalDateField.text     = goalDialog.prefillDate !== ""
+                                  ? goalDialog.prefillDate
+                                  : Qt.formatDate(new Date(), "yyyy-MM-dd")
         goalValueSpin.value    = 42
         goalUnitCombo.currentIndex = 0
     }
