@@ -1593,17 +1593,6 @@ ApplicationWindow {
         }
     }
 
-    // ── OpenAI key dialog ────────────────────────────────────────────────────
-    OpenAiKeyDialog {
-        id: openAiKeyDlg
-        textMuted:   root.textMuted
-        accent:      root.accent
-        surface2:    root.surface2
-        borderCol:   root.border
-        hasKey:      workoutStore.hasOpenAiKey
-        onKeySet: function(key) { workoutStore.setOpenAiKey(key) }
-    }
-
     // ── Goal creation dialog ─────────────────────────────────────────────────
     GoalDialog {
         id: goalCreateDialog

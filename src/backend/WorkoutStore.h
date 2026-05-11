@@ -43,7 +43,6 @@ class WorkoutStore : public QObject
     Q_PROPERTY(QVariantList goals                  READ goals                  NOTIFY goalsChanged)
     Q_PROPERTY(QString      coachNotes             READ coachNotes             NOTIFY coachNotesChanged)
     Q_PROPERTY(QVariantList routes                 READ routes                 NOTIFY routesChanged)
-    Q_PROPERTY(bool         hasOpenAiKey           READ hasOpenAiKey           NOTIFY openAiKeyChanged)
     Q_PROPERTY(bool         stravaConnected        READ stravaConnected        NOTIFY stravaStatusChanged)
     Q_PROPERTY(bool         stravaHasClientId      READ stravaHasClientId      NOTIFY stravaStatusChanged)
     Q_PROPERTY(QVariantList templateLibrary        READ templateLibrary        NOTIFY templatesChanged)
@@ -95,7 +94,6 @@ public:
     QVariantList goals()               const { return m_goals; }
     QString      coachNotes()          const { return m_coachNotes; }
     QVariantList routes()              const { return m_routes; }
-    bool         hasOpenAiKey()        const { return m_hasOpenAiKey; }
     bool         stravaConnected()     const { return m_stravaConnected; }
     bool         stravaHasClientId()   const { return m_stravaHasClientId; }
     QVariantList templateLibrary()     const { return m_templateLibrary; }
@@ -205,7 +203,6 @@ public:
                                    int count = 3);
     Q_INVOKABLE void buildRouteFromWaypoints(const QVariantList &waypoints, const QString &name);
     Q_INVOKABLE void deleteRoute(const QString &routeId);
-    Q_INVOKABLE void setOpenAiKey(const QString &key);
 
     // ── AI Coach ─────────────────────────────────────────────────────────────
     Q_INVOKABLE void sendAiMessage(const QString &text);
@@ -250,7 +247,6 @@ signals:
     void goalsChanged();
     void coachNotesChanged();
     void routesChanged();
-    void openAiKeyChanged();
     void stravaStatusChanged();
     void stravaSyncDone(int imported);
     void serverUrlChanged();
@@ -293,8 +289,11 @@ private:
     void fetchGoals();
     void fetchRoutes();
     void fetchCoachNotesInternal(const QString &athleteId);
-    void fetchOpenAiKeyStatus();
     void fetchStravaStatus();
+
+    // ── Ollama direct ─────────────────────────────────────────────────────────
+    QNetworkRequest makeOllamaRequest(const QString &path) const;
+    QString         buildAiSystemPrompt() const;
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     void setError(const QString &message);
@@ -327,7 +326,6 @@ private:
     QVariantList m_goals;
     QString      m_coachNotes;
     QVariantList m_routes;
-    bool         m_hasOpenAiKey = false;
     bool         m_stravaConnected   = false;
     bool         m_stravaHasClientId = false;
     QString      m_routeGenerating; // id of currently generating route ("" when idle)

@@ -266,7 +266,6 @@ void WorkoutStore::initialLoad()
     fetchCalendar();
     fetchTemplates();
     fetchRoutes();
-    fetchOpenAiKeyStatus();
     fetchStravaStatus();
     refreshAiModels();
 }
@@ -1120,28 +1119,6 @@ void WorkoutStore::fetchRoutes()
     });
 }
 
-void WorkoutStore::fetchOpenAiKeyStatus()
-{
-    httpAsync(QStringLiteral("/api/auth/openai-key"), [this](const QJsonDocument &doc) {
-        if (!doc.isObject()) return;
-        bool hasKey = doc.object().value(QStringLiteral("hasKey")).toBool(false);
-        if (hasKey != m_hasOpenAiKey) {
-            m_hasOpenAiKey = hasKey;
-            emit openAiKeyChanged();
-        }
-    });
-}
-
-void WorkoutStore::setOpenAiKey(const QString &key)
-{
-    QJsonObject body;
-    body[QStringLiteral("key")] = key;
-    const auto doc = httpSync(QStringLiteral("PUT"), QStringLiteral("/api/auth/openai-key"), body);
-    Q_UNUSED(doc);
-    m_hasOpenAiKey = !key.trimmed().isEmpty();
-    emit openAiKeyChanged();
-}
-
 void WorkoutStore::setServerUrl(const QString &url)
 {
     QString trimmed = url.trimmed();
@@ -1298,36 +1275,98 @@ void WorkoutStore::setBusy(bool value)
     emit busyChanged();
 }
 
-// ─── AI Coach ─────────────────────────────────────────────────────────────────
+// ─── AI Coach (direct Ollama API) ─────────────────────────────────────────────
+
+static const QString OLLAMA_BASE = QStringLiteral("http://localhost:11434");
+
+QNetworkRequest WorkoutStore::makeOllamaRequest(const QString &path) const
+{
+    QNetworkRequest req(QUrl(OLLAMA_BASE + path));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QByteArray("application/json"));
+    return req;
+}
+
+QString WorkoutStore::buildAiSystemPrompt() const
+{
+    // Athlete name
+    QString name = selectedAthleteName();
+    if (name.isEmpty()) name = QStringLiteral("Атлет");
+
+    // Goals
+    QStringList goalsLines;
+    for (const auto &v : m_goals) {
+        const QVariantMap g = v.toMap();
+        QString line = QStringLiteral("  - ") + g.value(QStringLiteral("title")).toString()
+                     + QStringLiteral(" (до ") + g.value(QStringLiteral("targetDate")).toString()
+                     + QStringLiteral(")");
+        goalsLines << line;
+    }
+    const QString goalsStr = goalsLines.isEmpty()
+        ? QStringLiteral("  Цели не заданы")
+        : goalsLines.join(QStringLiteral("\n"));
+
+    // 30d stats from analytics cache
+    const QVariantMap stats = m_analyticsSummary;
+    const int    cnt  = stats.value(QStringLiteral("workoutsCount")).toInt();
+    const double dist = stats.value(QStringLiteral("distanceTotal")).toDouble();
+    const int    dur  = stats.value(QStringLiteral("durationTotal")).toInt();
+
+    return QStringLiteral(
+        "Ты персональный AI тренер в приложении PeMa. Помогаешь атлету улучшать результаты.\n\n"
+        "ВАЖНО: Отвечай ТОЛЬКО на вопросы о тренировках, спорте, восстановлении, спортивном питании "
+        "и здоровье атлета. Если вопрос не по теме — вежливо откажись: «Я могу помочь только с вопросами о тренировках».\n\n"
+        "Профиль атлета: %1\n\n"
+        "Активные цели:\n%2\n\n"
+        "Статистика за 30 дней: выполнено %3 тренировок, %4 км, %5 мин.\n\n"
+        "Правила: будь конкретным и кратким. Отвечай на русском языке. Не превышай 400 слов в ответе."
+    ).arg(name, goalsStr)
+     .arg(cnt).arg(dist, 0, 'f', 1).arg(dur);
+}
 
 void WorkoutStore::refreshAiModels()
 {
-    httpAsync(QStringLiteral("/api/ai/models"), [this](const QJsonDocument &doc) {
+    // GET http://localhost:11434/api/tags — no auth header needed
+    auto *reply = m_nam->get(makeOllamaRequest(QStringLiteral("/api/tags")));
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray data = reply->readAll();
+        const bool networkOk = (reply->error() == QNetworkReply::NoError);
+        reply->deleteLater();
+
         // Finish "starting" state regardless of result
         if (m_ollamaStarting) {
             m_ollamaStarting = false;
             emit ollamaStateChanged();
         }
 
-        if (!doc.isObject()) {
+        if (!networkOk || data.isEmpty()) {
             if (m_aiAvailable) {
                 m_aiAvailable = false;
                 emit aiAvailableChanged();
             }
             return;
         }
-        const QJsonObject obj = doc.object();
-        const bool avail = obj.value(QStringLiteral("available")).toBool(false);
+
+        const QJsonDocument doc = QJsonDocument::fromJson(data);
+        if (!doc.isObject()) {
+            if (m_aiAvailable) { m_aiAvailable = false; emit aiAvailableChanged(); }
+            return;
+        }
+
+        // Ollama /api/tags returns {"models": [{"name":"...", ...}, ...]}
+        const QJsonArray arr = doc.object().value(QStringLiteral("models")).toArray();
+        m_aiModels.clear();
+        for (const auto &v : arr)
+            m_aiModels << v.toObject().value(QStringLiteral("name")).toString();
+
+        if (m_aiModel.isEmpty() && !m_aiModels.isEmpty())
+            m_aiModel = m_aiModels.first();
+
+        const bool avail = !m_aiModels.isEmpty() || networkOk;
         if (avail != m_aiAvailable) {
             m_aiAvailable = avail;
             emit aiAvailableChanged();
         }
-        const QJsonArray arr = obj.value(QStringLiteral("models")).toArray();
-        m_aiModels.clear();
-        for (const auto &v : arr)
-            m_aiModels << v.toString();
-        if (m_aiModel.isEmpty() && !m_aiModels.isEmpty())
-            m_aiModel = m_aiModels.first();
         emit aiModelsChanged();
     });
 }
@@ -1410,8 +1449,15 @@ void WorkoutStore::sendAiMessage(const QString &text)
     m_chatHistory.append(userMsg);
     emit chatHistoryChanged();
 
-    // Build messages array for the backend
+    // Build messages array for Ollama: system prompt + history
     QJsonArray messages;
+
+    // System message with athlete context
+    QJsonObject sysMsg;
+    sysMsg[QStringLiteral("role")]    = QStringLiteral("system");
+    sysMsg[QStringLiteral("content")] = buildAiSystemPrompt();
+    messages.append(sysMsg);
+
     for (const auto &v : std::as_const(m_chatHistory)) {
         const QVariantMap m = v.toMap();
         QJsonObject msg;
@@ -1421,24 +1467,39 @@ void WorkoutStore::sendAiMessage(const QString &text)
     }
 
     QJsonObject body;
-    body[QStringLiteral("athlete_id")] = m_selectedAthleteId;
-    body[QStringLiteral("model")]      = m_aiModel;
-    body[QStringLiteral("messages")]   = messages;
+    body[QStringLiteral("model")]    = m_aiModel;
+    body[QStringLiteral("messages")] = messages;
+    body[QStringLiteral("stream")]   = false;
+
+    const QByteArray bodyBytes = QJsonDocument(body).toJson(QJsonDocument::Compact);
 
     m_aiTyping = true;
     emit aiTypingChanged();
 
-    QTimer::singleShot(0, this, [this, body]() {
-        const auto doc = httpSync(QStringLiteral("POST"), QStringLiteral("/api/ai/chat"), body);
+    // POST http://localhost:11434/api/chat — non-blocking via signal/slot
+    auto *netReply = m_nam->post(makeOllamaRequest(QStringLiteral("/api/chat")), bodyBytes);
+
+    connect(netReply, &QNetworkReply::finished, this, [this, netReply]() {
+        const QByteArray data = netReply->readAll();
+        netReply->deleteLater();
+
         m_aiTyping = false;
         emit aiTypingChanged();
-        if (doc.isNull()) return;
-        const QJsonObject obj = doc.object();
-        const QString reply = obj.value(QStringLiteral("reply")).toString();
-        if (reply.isEmpty()) return;
+
+        if (data.isEmpty()) return;
+
+        const QJsonDocument doc = QJsonDocument::fromJson(data);
+        if (!doc.isObject()) return;
+
+        // Ollama /api/chat response: {"message": {"role": "assistant", "content": "..."}}
+        const QString content = doc.object()
+            .value(QStringLiteral("message")).toObject()
+            .value(QStringLiteral("content")).toString();
+        if (content.isEmpty()) return;
+
         QVariantMap aiMsg;
         aiMsg[QStringLiteral("role")]    = QStringLiteral("assistant");
-        aiMsg[QStringLiteral("content")] = reply;
+        aiMsg[QStringLiteral("content")] = content;
         aiMsg[QStringLiteral("ts")]      = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm"));
         m_chatHistory.append(aiMsg);
         emit chatHistoryChanged();
