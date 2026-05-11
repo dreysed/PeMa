@@ -55,6 +55,13 @@ class WorkoutStore : public QObject
     Q_PROPERTY(QString      errorMessage           READ errorMessage           NOTIFY errorChanged)
     Q_PROPERTY(bool         busy                   READ busy                   NOTIFY busyChanged)
 
+    // ── AI Coach ──────────────────────────────────────────────────────────────
+    Q_PROPERTY(QVariantList chatHistory  READ chatHistory  NOTIFY chatHistoryChanged)
+    Q_PROPERTY(bool         aiTyping     READ aiTyping     NOTIFY aiTypingChanged)
+    Q_PROPERTY(QStringList  aiModels     READ aiModels     NOTIFY aiModelsChanged)
+    Q_PROPERTY(QString      aiModel      READ aiModel      WRITE setAiModel NOTIFY aiModelsChanged)
+    Q_PROPERTY(bool         aiAvailable  READ aiAvailable  NOTIFY aiAvailableChanged)
+
 public:
     explicit WorkoutStore(QObject *parent = nullptr);
 
@@ -96,6 +103,14 @@ public:
     QStringList  intensities()         const { return {QStringLiteral("easy"), QStringLiteral("moderate"), QStringLiteral("hard")}; }
     QString      errorMessage()        const { return m_errorMessage; }
     bool         busy()                const { return m_busy; }
+
+    // ── AI Coach getters ──────────────────────────────────────────────────────
+    QVariantList chatHistory() const { return m_chatHistory; }
+    bool         aiTyping()    const { return m_aiTyping; }
+    QStringList  aiModels()    const { return m_aiModels; }
+    QString      aiModel()     const { return m_aiModel; }
+    bool         aiAvailable() const { return m_aiAvailable; }
+    void         setAiModel(const QString &model);
 
     // ── Auth invokables ───────────────────────────────────────────────────────
     Q_INVOKABLE void loginUser(const QString &email, const QString &password);
@@ -185,6 +200,11 @@ public:
     Q_INVOKABLE void deleteRoute(const QString &routeId);
     Q_INVOKABLE void setOpenAiKey(const QString &key);
 
+    // ── AI Coach ─────────────────────────────────────────────────────────────
+    Q_INVOKABLE void sendAiMessage(const QString &text);
+    Q_INVOKABLE void clearAiChat();
+    Q_INVOKABLE void refreshAiModels();
+
     // ── Strava ────────────────────────────────────────────────────────────────
     Q_INVOKABLE void saveStravaCredentials(const QString &clientId,
                                            const QString &clientSecret);
@@ -232,6 +252,12 @@ signals:
     void errorChanged(const QString &message);
     void busyChanged();
     void workoutCreated();
+
+    // AI Coach
+    void chatHistoryChanged();
+    void aiTypingChanged();
+    void aiModelsChanged();
+    void aiAvailableChanged();
 
 private slots:
     void initialLoad();
@@ -307,4 +333,11 @@ private:
     QString m_selectedAthleteId;
     QString m_errorMessage;
     bool    m_busy              = false;
+
+    // ── AI Coach ──────────────────────────────────────────────────────────────
+    QVariantList m_chatHistory;
+    bool         m_aiTyping    = false;
+    QStringList  m_aiModels;
+    QString      m_aiModel;
+    bool         m_aiAvailable = false;
 };

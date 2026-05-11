@@ -259,6 +259,7 @@ void WorkoutStore::initialLoad()
     fetchRoutes();
     fetchOpenAiKeyStatus();
     fetchStravaStatus();
+    refreshAiModels();
 }
 
 // ─── HTTP layer ───────────────────────────────────────────────────────────────
@@ -1286,4 +1287,90 @@ void WorkoutStore::setBusy(bool value)
     if (value == m_busy) return;
     m_busy = value;
     emit busyChanged();
+}
+
+// ─── AI Coach ─────────────────────────────────────────────────────────────────
+
+void WorkoutStore::refreshAiModels()
+{
+    httpAsync(QStringLiteral("/api/ai/models"), [this](const QJsonDocument &doc) {
+        if (!doc.isObject()) {
+            m_aiAvailable = false;
+            emit aiAvailableChanged();
+            return;
+        }
+        const QJsonObject obj = doc.object();
+        const bool avail = obj.value(QStringLiteral("available")).toBool(false);
+        if (avail != m_aiAvailable) {
+            m_aiAvailable = avail;
+            emit aiAvailableChanged();
+        }
+        const QJsonArray arr = obj.value(QStringLiteral("models")).toArray();
+        m_aiModels.clear();
+        for (const auto &v : arr)
+            m_aiModels << v.toString();
+        if (m_aiModel.isEmpty() && !m_aiModels.isEmpty())
+            m_aiModel = m_aiModels.first();
+        emit aiModelsChanged();
+    });
+}
+
+void WorkoutStore::setAiModel(const QString &model)
+{
+    if (m_aiModel == model) return;
+    m_aiModel = model;
+    emit aiModelsChanged();
+}
+
+void WorkoutStore::clearAiChat()
+{
+    m_chatHistory.clear();
+    emit chatHistoryChanged();
+}
+
+void WorkoutStore::sendAiMessage(const QString &text)
+{
+    if (text.trimmed().isEmpty() || m_aiTyping) return;
+
+    // Add user message to history
+    QVariantMap userMsg;
+    userMsg[QStringLiteral("role")]    = QStringLiteral("user");
+    userMsg[QStringLiteral("content")] = text.trimmed();
+    userMsg[QStringLiteral("ts")]      = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm"));
+    m_chatHistory.append(userMsg);
+    emit chatHistoryChanged();
+
+    // Build messages array for the backend
+    QJsonArray messages;
+    for (const auto &v : std::as_const(m_chatHistory)) {
+        const QVariantMap m = v.toMap();
+        QJsonObject msg;
+        msg[QStringLiteral("role")]    = m.value(QStringLiteral("role")).toString();
+        msg[QStringLiteral("content")] = m.value(QStringLiteral("content")).toString();
+        messages.append(msg);
+    }
+
+    QJsonObject body;
+    body[QStringLiteral("athlete_id")] = m_selectedAthleteId;
+    body[QStringLiteral("model")]      = m_aiModel;
+    body[QStringLiteral("messages")]   = messages;
+
+    m_aiTyping = true;
+    emit aiTypingChanged();
+
+    QTimer::singleShot(0, this, [this, body]() {
+        const auto doc = httpSync(QStringLiteral("POST"), QStringLiteral("/api/ai/chat"), body);
+        m_aiTyping = false;
+        emit aiTypingChanged();
+        if (doc.isNull()) return;
+        const QJsonObject obj = doc.object();
+        const QString reply = obj.value(QStringLiteral("reply")).toString();
+        if (reply.isEmpty()) return;
+        QVariantMap aiMsg;
+        aiMsg[QStringLiteral("role")]    = QStringLiteral("assistant");
+        aiMsg[QStringLiteral("content")] = reply;
+        aiMsg[QStringLiteral("ts")]      = QDateTime::currentDateTime().toString(QStringLiteral("HH:mm"));
+        m_chatHistory.append(aiMsg);
+        emit chatHistoryChanged();
+    });
 }

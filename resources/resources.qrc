@@ -2,6 +2,7 @@
     <qresource prefix="/">
         <file alias="qml/main.qml">../src/ui/qml/main.qml</file>
         <file alias="qml/RouteTab.qml">../src/ui/qml/RouteTab.qml</file>
+        <file alias="qml/AiCoachTab.qml">../src/ui/qml/AiCoachTab.qml</file>
         <file alias="qml/components/ErrorBanner.qml">../src/ui/qml/components/ErrorBanner.qml</file>
         <file alias="qml/components/AuthScreen.qml">../src/ui/qml/components/AuthScreen.qml</file>
         <file alias="qml/components/CreateWorkoutPopup.qml">../src/ui/qml/components/CreateWorkoutPopup.qml</file>

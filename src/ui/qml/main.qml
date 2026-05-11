@@ -274,7 +274,7 @@ ApplicationWindow {
                 Row {
                     spacing: 2
                     Repeater {
-                        model: ["Календарь", "Шаблоны", "Аналитика", "Маршрут"]
+                        model: ["Календарь", "Шаблоны", "Аналитика", "Маршрут", "AI Тренер"]
                         delegate: Rectangle {
                             width: lbl.implicitWidth + 28; height: 34; radius: 8
                             color: mainTabs.currentIndex === index
@@ -1556,6 +1556,20 @@ ApplicationWindow {
                     onOpenStravaSettingsRequested: {
                         stravaSettingsDlg.open()
                     }
+                }
+
+                // ── TAB 4: AI Тренер ──────────────────────────────────────────
+                AiCoachTab {
+                    bg:          root.bg
+                    surface:     root.surface
+                    surface2:    root.surface2
+                    borderCol:   root.border
+                    textPrimary: root.textPrimary
+                    textMuted:   root.textMuted
+                    accent:      root.accent
+                    runColor:    root.runColor
+                    dark:        root.dark
+                    store:       workoutStore
                 }
             }
         }

@@ -1940,3 +1940,244 @@ def _decode_polyline(polyline_str: str) -> list:
         lng += dlng
         coords.append([lng / 1e5, lat / 1e5])  # [lon, lat] for GeoJSON
     return coords
+
+
+# ─── AI Coach (Ollama) ────────────────────────────────────────────────────────
+
+import re as _re
+
+OLLAMA_BASE = "http://localhost:11434"
+
+
+def _build_ai_context(athlete_id: str, db: Session) -> dict:
+    """Collect athlete data to inject into the AI system prompt."""
+    today = Date.today()
+
+    # Recent workouts (last 21 days)
+    since = (today - timedelta(days=21)).strftime("%Y-%m-%d")
+    recent = db.query(WorkoutDB).filter(
+        WorkoutDB.athlete_id == athlete_id,
+        WorkoutDB.date >= since,
+    ).order_by(WorkoutDB.date.desc()).limit(14).all()
+
+    recent_list = []
+    for w in recent:
+        recent_list.append({
+            "date": w.date,
+            "category": w.category,
+            "title": w.title,
+            "distance_km": _effective_distance(w),
+            "duration_min": _effective_duration(w),
+            "intensity": w.intensity,
+            "status": w.status,
+        })
+
+    # Active goals
+    goals = db.query(GoalDB).filter(
+        GoalDB.athlete_id == athlete_id,
+        GoalDB.completed_at.is_(None),
+    ).order_by(GoalDB.target_date).all()
+
+    goals_list = [
+        {
+            "title": g.title,
+            "targetDate": g.target_date,
+            "targetValue": g.target_value,
+            "targetUnit": g.target_unit,
+        }
+        for g in goals
+    ]
+
+    # Extract pain points from recent feedback
+    pain_ids: set[str] = set()
+    for w in recent:
+        if w.feedback:
+            m = _re.search(r"\[PainIds:([^\]]*)\]", w.feedback or "")
+            if m:
+                for pid in m.group(1).split(","):
+                    pid = pid.strip()
+                    if pid:
+                        pain_ids.add(pid)
+
+    pain_labels = {
+        "head": "Голова", "neck": "Шея",
+        "lshoulder": "Лев. плечо", "rshoulder": "Прав. плечо",
+        "chest": "Грудь/пресс", "lback": "Поясница",
+        "lelbow": "Лев. локоть", "relbow": "Прав. локоть",
+        "lwrist": "Лев. запястье", "rwrist": "Прав. запястье",
+        "lhip": "Лев. бедро", "rhip": "Прав. бедро",
+        "lknee": "Лев. колено", "rknee": "Прав. колено",
+        "lshin": "Лев. голень", "rshin": "Прав. голень",
+        "lankle": "Лев. лодыжка", "rankle": "Прав. лодыжка",
+    }
+    pain_human = [pain_labels.get(p, p) for p in pain_ids]
+
+    # Quick 30-day stats
+    since30 = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    done30 = db.query(WorkoutDB).filter(
+        WorkoutDB.athlete_id == athlete_id,
+        WorkoutDB.date >= since30,
+        WorkoutDB.status == "done",
+    ).all()
+
+    dist30 = round(sum(_effective_distance(w) for w in done30), 1)
+    dur30  = sum(_effective_duration(w) for w in done30)
+
+    # Athlete name
+    athlete = db.query(AthleteDB).filter(AthleteDB.id == athlete_id).first()
+    user = db.query(UserDB).filter(UserDB.id == athlete.user_id).first() if athlete else None
+    name = user.name if user else "Атлет"
+
+    return {
+        "name": name,
+        "goals": goals_list,
+        "pain_points": pain_human,
+        "recent_workouts": recent_list,
+        "stats": {
+            "workoutsCount": len(done30),
+            "distanceTotal": dist30,
+            "durationTotal": dur30,
+        },
+    }
+
+
+def _build_system_prompt(ctx: dict) -> str:
+    goals_str = "\n".join([
+        f"  - {g['title']} (до {g['targetDate']}"
+        + (f", цель: {g['targetValue']} {g['targetUnit']}" if g.get("targetValue") else "")
+        + ")"
+        for g in ctx.get("goals", [])
+    ]) or "  Цели не заданы"
+
+    injuries_str = (", ".join(ctx.get("pain_points", []))) or "Нет"
+
+    recent = ctx.get("recent_workouts", [])
+    recent_str = "\n".join([
+        f"  - {w['date']}: {w['category']} {w['distance_km']} км"
+        f" {w['duration_min']} мин [{w['status']}]"
+        for w in recent[:7]
+    ]) or "  Нет данных"
+
+    stats = ctx.get("stats", {})
+
+    return f"""Ты персональный AI тренер в приложении PeMa. Помогаешь атлету улучшать результаты.
+
+ВАЖНО: Отвечай ТОЛЬКО на вопросы о тренировках, спорте, восстановлении, спортивном питании и здоровье атлета. Если вопрос не по теме — вежливо откажись: «Я могу помочь только с вопросами о тренировках».
+
+Профиль атлета: {ctx.get("name", "Атлет")}
+
+Активные цели:
+{goals_str}
+
+Болевые точки и травмы: {injuries_str}
+
+Последние тренировки:
+{recent_str}
+
+Статистика за 30 дней: выполнено {stats.get("workoutsCount", 0)} тренировок, {stats.get("distanceTotal", 0)} км, {stats.get("durationTotal", 0)} мин.
+
+Правила: будь конкретным и кратким. Всегда учитывай травмы. Отвечай на русском языке. Не превышай 400 слов в ответе."""
+
+
+class AiMessage(BaseModel):
+    role: str
+    content: str
+
+
+class AiChatRequest(BaseModel):
+    athlete_id: str
+    messages: list[AiMessage]
+    model: str = "llama3.2"
+
+
+@app.get("/api/ai/models")
+async def get_ai_models(
+    current_user: UserDB = Depends(get_current_user),
+):
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            resp = await client.get(f"{OLLAMA_BASE}/api/tags")
+            data = resp.json()
+            models = [m["name"] for m in data.get("models", [])]
+            return {"models": models, "available": True}
+    except Exception:
+        return {"models": [], "available": False}
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(
+    data: AiChatRequest,
+    current_user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _assert_athlete_access(current_user, data.athlete_id, db)
+
+    ctx = _build_ai_context(data.athlete_id, db)
+    system_prompt = _build_system_prompt(ctx)
+
+    messages = [{"role": m.role, "content": m.content} for m in data.messages]
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=180.0) as client:
+            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                "model": data.model,
+                "messages": [{"role": "system", "content": system_prompt}] + messages,
+                "stream": False,
+            })
+            result = resp.json()
+            content = result["message"]["content"]
+            return {"content": content}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Ollama недоступен: {e}")
+
+
+class AiExtractRequest(BaseModel):
+    text: str
+    model: str = "llama3.2"
+
+
+@app.post("/api/ai/extract-workout")
+async def ai_extract_workout(
+    data: AiExtractRequest,
+    current_user: UserDB = Depends(get_current_user),
+):
+    extract_prompt = f"""Из текста тренера извлеки параметры ОДНОЙ тренировки и верни ТОЛЬКО валидный JSON без пояснений.
+
+Текст: {data.text[:1500]}
+
+Формат ответа (только JSON, ничего лишнего):
+{{"title":"название","category":"run","distanceKm":5.0,"durationMin":45,"intensity":"moderate","notes":"заметки"}}
+
+Правила:
+- category: только run, bike или swim
+- intensity: только easy, moderate или hard
+- Если данных нет — используй разумные значения по умолчанию
+- ТОЛЬКО JSON, никакого текста вокруг"""
+
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(f"{OLLAMA_BASE}/api/chat", json={
+                "model": data.model,
+                "messages": [{"role": "user", "content": extract_prompt}],
+                "stream": False,
+            })
+            content = resp.json()["message"]["content"]
+            match = _re.search(r"\{[^{}]*\}", content, _re.DOTALL)
+            if match:
+                import json as _json
+                workout = _json.loads(match.group())
+                return workout
+    except Exception:
+        pass
+
+    return {
+        "title": "Тренировка от AI",
+        "category": "run",
+        "distanceKm": 5.0,
+        "durationMin": 45,
+        "intensity": "moderate",
+        "notes": "",
+    }
