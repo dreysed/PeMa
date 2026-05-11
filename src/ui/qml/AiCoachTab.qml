@@ -74,7 +74,7 @@ Item {
                                 color: root.textPrimary
                             }
                             Label {
-                                text: "На базе Llama 3.3 · Together AI"
+                                text: "На базе Gemini 2.0 · Google"
                                 font.pixelSize: 11
                                 color: root.textMuted
                             }

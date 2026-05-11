@@ -1930,13 +1930,13 @@ def _decode_polyline(polyline_str: str) -> list:
     return coords
 
 
-# ─── AI Coach (Together AI) ───────────────────────────────────────────────────
+# ─── AI Coach (Google Gemini — free tier) ─────────────────────────────────────
 
 import re as _re
 
-AI_API_KEY = os.getenv("TOGETHER_API_KEY", "")
-AI_BASE    = "https://api.together.xyz/v1"
-AI_MODEL   = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+AI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+AI_BASE    = "https://generativelanguage.googleapis.com/v1beta/openai"
+AI_MODEL   = "gemini-2.0-flash"
 
 
 def _build_ai_context(athlete_id: str, db: Session) -> dict:
@@ -2076,7 +2076,7 @@ async def ai_chat(
     db: Session = Depends(get_db),
 ):
     if not AI_API_KEY:
-        raise HTTPException(503, "TOGETHER_API_KEY не задан на сервере")
+        raise HTTPException(503, "GEMINI_API_KEY не задан на сервере")
 
     _assert_athlete_access(current_user, data.athlete_id, db)
 
