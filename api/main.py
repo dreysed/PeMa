@@ -1411,6 +1411,22 @@ class OpenAiKeyRequest(BaseModel):
     key: str
 
 
+def _haversine_km(coords: list) -> float:
+    """Sum of great-circle distances along a coordinate list [[lon, lat], ...]."""
+    import math
+    total = 0.0
+    for i in range(1, len(coords)):
+        lon1, lat1 = coords[i - 1][0], coords[i - 1][1]
+        lon2, lat2 = coords[i][0],     coords[i][1]
+        dlat = math.radians(lat2 - lat1)
+        dlon = math.radians(lon2 - lon1)
+        a = (math.sin(dlat / 2) ** 2
+             + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+             * math.sin(dlon / 2) ** 2)
+        total += 6371.0 * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return total
+
+
 def _route_to_dict(r: RouteDB) -> dict:
     return {
         "id":          r.id,
@@ -1524,8 +1540,8 @@ def generate_route(
 
     # ── Step 3: Snap to road network via OSRM (free public server) ─────────────
     coords_str = ";".join(f"{p[0]},{p[1]}" for p in waypoints)
-    geojson_coords = waypoints   # fallback: straight lines
-    actual_dist = target_km
+    geojson_coords = waypoints   # fallback: geometric polygon
+    actual_dist = _haversine_km(waypoints)  # Haversine fallback (better than target_km)
 
     try:
         with httpx.Client(timeout=15) as client:
@@ -1587,7 +1603,7 @@ def route_from_waypoints(
 
     coords_str = ";".join(f"{p[0]},{p[1]}" for p in wps)
     geojson_coords = wps
-    actual_dist = 0.0
+    actual_dist = _haversine_km(wps)   # fallback: straight-line distance
 
     try:
         with httpx.Client(timeout=15) as client:
@@ -1601,7 +1617,7 @@ def route_from_waypoints(
                 geojson_coords = rdata[0]["geometry"]["coordinates"]
                 actual_dist = rdata[0].get("distance", 0) / 1000.0
     except Exception:
-        pass
+        pass   # keep Haversine fallback
 
     geojson = json.dumps({"type": "LineString", "coordinates": geojson_coords})
     route = RouteDB(

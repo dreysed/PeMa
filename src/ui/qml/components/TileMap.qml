@@ -42,6 +42,9 @@ Item {
         routeCanvas.requestPaint()
     }
 
+    // Repaint when waypoints are changed externally (e.g. loading a route for editing)
+    onEditWaypointsChanged: routeCanvas.requestPaint()
+
     // ── Mercator helpers ──────────────────────────────────────────────────────
     function _scale()          { return Math.pow(2, zoom) * 256 }
     function _lonToWorld(lon)  { return (lon + 180) / 360 * _scale() }
@@ -117,15 +120,33 @@ Item {
         routeCanvas.requestPaint()
     }
 
+    // ── Zoom visual preview ───────────────────────────────────────────────────
+    // _tilesZoom = zoom at which tileData was last built.
+    // _zoomScale = live scale applied to tileGroup so old tiles approximate
+    //              the new zoom level while fresh tiles load.
+    property int  _tilesZoom: zoom
+    property real _zoomScale: 1.0
+
     // Debounce tile updates (avoids double-rebuild when both lat+lon change at once)
     Timer {
         id: tileTimer; interval: 60; repeat: false
-        onTriggered: { tileMap._updateTiles(); routeCanvas.requestPaint() }
+        onTriggered: {
+            tileMap._updateTiles()
+            tileMap._tilesZoom = tileMap.zoom
+            tileMap._zoomScale = 1.0      // snap back — new tiles are ready
+            routeCanvas.requestPaint()
+        }
     }
 
     onWidthChanged:       Qt.callLater(_updateTiles)
     onHeightChanged:      Qt.callLater(_updateTiles)
-    onZoomChanged:        { tileTimer.restart() }
+    onZoomChanged: {
+        if (!panMa.pressed) {
+            // Show scaled preview of old tiles immediately
+            tileMap._zoomScale = Math.pow(2, tileMap.zoom - tileMap._tilesZoom)
+            tileTimer.restart()
+        }
+    }
     onRouteCoordsChanged: Qt.callLater(fitRoute)
     Component.onCompleted: Qt.callLater(fitRoute)
 
@@ -133,19 +154,32 @@ Item {
     onCenterLatChanged: { if (!panMa.pressed) tileTimer.restart() }
     onCenterLonChanged: { if (!panMa.pressed) tileTimer.restart() }
 
+    // ── Wheel / trackpad throttle ─────────────────────────────────────────────
+    property real _wheelAccum: 0
+    // After each zoom-level change, lock for 180 ms so trackpad can't fly to max
+    Timer { id: zoomCooldown; interval: 180; repeat: false }
+
     // ── Pan drag state ────────────────────────────────────────────────────────
     property real   _dragX:   0; property real   _dragY:   0
     property double _dragLat: 0; property double _dragLon: 0
     // Live pixel offset applied to tileGroup during drag
     property real   _panOffX: 0; property real   _panOffY: 0
 
-    // ── Tile + Canvas layer (translated together during drag) ─────────────────
+    // ── Tile + Canvas layer (translated during drag, scaled during zoom) ────────
     Item {
         id: tileGroup
         // Extend beyond clip boundary so tiles don't vanish mid-pan
         x: tileMap._panOffX - 512;  y: tileMap._panOffY - 512
         width:  tileMap.width  + 1024
         height: tileMap.height + 1024
+
+        // Zoom preview: scale old tiles from map centre while new tiles load
+        transform: Scale {
+            xScale: tileMap._zoomScale; yScale: tileMap._zoomScale
+            // Origin = screen centre in tileGroup's coordinate system
+            origin.x: tileMap.width  / 2 + 512
+            origin.y: tileMap.height / 2 + 512
+        }
 
         // Background fill
         Rectangle {
@@ -327,9 +361,22 @@ Item {
         }
 
         onWheel: function(e) {
-            tileMap._panOffX = 0; tileMap._panOffY = 0
-            if (e.angleDelta.y > 0) tileMap.zoom = Math.min(18, tileMap.zoom + 1)
-            else                     tileMap.zoom = Math.max(8,  tileMap.zoom - 1)
+            // Throttle: trackpad fires many tiny events — accumulate until 60 units,
+            // then lock for 180 ms so a fast swipe doesn't fly to max/min zoom.
+            if (zoomCooldown.running) { e.accepted = true; return }
+            tileMap._wheelAccum += e.angleDelta.y
+            if (tileMap._wheelAccum >= 60) {
+                tileMap._panOffX = 0; tileMap._panOffY = 0
+                tileMap.zoom = Math.min(18, tileMap.zoom + 1)
+                tileMap._wheelAccum = 0
+                zoomCooldown.restart()
+            } else if (tileMap._wheelAccum <= -60) {
+                tileMap._panOffX = 0; tileMap._panOffY = 0
+                tileMap.zoom = Math.max(8, tileMap.zoom - 1)
+                tileMap._wheelAccum = 0
+                zoomCooldown.restart()
+            }
+            e.accepted = true
         }
     }
 }

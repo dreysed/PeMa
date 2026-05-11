@@ -446,18 +446,29 @@ Item {
                         }
                     }
 
-                    // Open on OSM
+                    // Edit existing route — sample GeoJSON into edit waypoints
                     Rectangle {
-                        height: 30; width: osmLbl.implicitWidth + 16; radius: 7
+                        height: 30; width: editRtLbl.implicitWidth + 16; radius: 7
                         color: surface2; border.width: 1; border.color: borderCol
-                        Label { id: osmLbl; anchors.centerIn: parent; text: "В браузере"; font.pixelSize: 11; color: accent }
+                        Label { id: editRtLbl; anchors.centerIn: parent; text: "Редактировать"; font.pixelSize: 11; color: accent }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
                             onClicked: {
-                                if (routeTab.selectedRoute) {
-                                    var lat = routeTab.selectedRoute.startLat || 55.75
-                                    var lon = routeTab.selectedRoute.startLon || 37.62
-                                    Qt.openUrlExternally("https://www.openstreetmap.org/?mlat=" + lat + "&mlon=" + lon + "&zoom=14")
-                                }
+                                if (!routeTab.selectedRoute || !routeTab.selectedRoute.geojson) return
+                                try {
+                                    var geo = JSON.parse(routeTab.selectedRoute.geojson)
+                                    var coords = geo.coordinates || []
+                                    if (coords.length < 2) return
+                                    // Sample ~10 evenly-spaced waypoints from the stored LineString
+                                    var wps = []
+                                    var n = Math.min(10, coords.length)
+                                    for (var i = 0; i < n; i++) {
+                                        var idx = Math.round(i * (coords.length - 1) / (n - 1))
+                                        wps.push({ lon: coords[idx][0], lat: coords[idx][1] })
+                                    }
+                                    theMap.editWaypoints = wps
+                                    theMap.editMode = true
+                                    // onEditWaypointsChanged in TileMap handles repaint
+                                } catch(ex) {}
                             }
                         }
                     }
