@@ -316,6 +316,7 @@ ApplicationWindow {
                     text: "Атлет"; color: textMuted; font.pixelSize: 12
                 }
                 ComboBox {
+                    id: athleteCombo
                     visible: workoutStore.currentUserRole === "coach" && workoutStore.athletes.length > 0
                     implicitWidth: 155; implicitHeight: 32
                     model: workoutStore.athletes
@@ -325,7 +326,7 @@ ApplicationWindow {
                         target: workoutStore
                         function onAthletesChanged() {
                             for (let i = 0; i < workoutStore.athletes.length; ++i)
-                                if (workoutStore.athletes[i].id === workoutStore.selectedAthleteId) { currentIndex = i; break }
+                                if (workoutStore.athletes[i].id === workoutStore.selectedAthleteId) { athleteCombo.currentIndex = i; break }
                         }
                     }
                 }
@@ -509,7 +510,7 @@ ApplicationWindow {
                                         // Add button
                                         Rectangle {
                                             anchors { top: parent.top; right: parent.right; margins: 4 }
-                                            width: 18; height: 18; radius: 5; color: energy
+                                            width: 18; height: 18; radius: 5; color: energy; z: 10
                                             visible: hov.containsMouse && workoutStore.canEditWorkouts
                                             Label { anchors.centerIn: parent; text: "+"; font.pixelSize: 13; font.weight: Font.Bold; color: "#fff" }
                                             MouseArea {
@@ -518,11 +519,11 @@ ApplicationWindow {
                                             }
                                         }
 
-                                        // Goal marker 🎯 — overlaid in top-right when this date is a goal target
+                                        // Goal marker 🏆 — centred at bottom of cell
                                         Label {
-                                            anchors { top: parent.top; right: parent.right; margins: 3 }
-                                            text: "🎯"
-                                            font.pixelSize: 10
+                                            anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter; bottomMargin: 3 }
+                                            text: "🏆"
+                                            font.pixelSize: 11; z: 5
                                             visible: {
                                                 var iso = day.dateIso || ""
                                                 var goals = workoutStore.goals
@@ -654,7 +655,7 @@ ApplicationWindow {
                                             width: 30; height: 30; radius: 8
                                             color: surface2; border.width: 1; border.color: border
                                             ToolTip.visible: goalAddMa.containsMouse; ToolTip.text: "Добавить цель на эту дату"; ToolTip.delay: 400
-                                            Label { anchors.centerIn: parent; text: "🎯"; font.pixelSize: 14 }
+                                            Label { anchors.centerIn: parent; text: "🏆"; font.pixelSize: 14 }
                                             MouseArea {
                                                 id: goalAddMa; anchors.fill: parent; hoverEnabled: true; cursorShape: Qt.PointingHandCursor
                                                 onClicked: { goalCreateDialog.prefillDate = workoutStore.selectedDateIso; goalCreateDialog.open() }
@@ -1270,34 +1271,38 @@ ApplicationWindow {
                                                     : "—", sub: root.analyticsObj.avgHrBpm ? (root.analyticsObj.avgHrBpm + " уд/мин") : "" },
                                             ]
                                             delegate: Item {
-                                                width: parent.width; height: 50
+                                                Layout.fillWidth: true; height: 50
                                                 // Bottom separator
                                                 Rectangle {
                                                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
                                                     height: 1; color: border; opacity: 0.6
                                                 }
-                                                // Label on left, value pinned to right edge at fixed x
-                                                Item {
-                                                    anchors { fill: parent; topMargin: 8; bottomMargin: 8 }
-                                                    // value column — fixed 88px wide, right-aligned
-                                                    Column {
-                                                        anchors.right: parent.right
-                                                        anchors.verticalCenter: parent.verticalCenter
-                                                        width: 88
+                                                RowLayout {
+                                                    anchors { fill: parent; topMargin: 7; bottomMargin: 7 }
+                                                    spacing: 8
+                                                    // Left: label + sub
+                                                    ColumnLayout {
+                                                        Layout.fillWidth: true; spacing: 2
                                                         Label {
-                                                            width: parent.width
-                                                            text: modelData.value
-                                                            font.pixelSize: 20; font.weight: Font.Black
-                                                            color: textPrimary; font.letterSpacing: -0.5
-                                                            horizontalAlignment: Text.AlignRight
+                                                            text: modelData.label
+                                                            font.pixelSize: 12; color: textMuted
+                                                            elide: Text.ElideRight; Layout.fillWidth: true
+                                                        }
+                                                        Label {
+                                                            text: modelData.sub
+                                                            font.pixelSize: 10; color: textMuted
+                                                            visible: modelData.sub !== ""
+                                                            elide: Text.ElideRight; Layout.fillWidth: true
                                                         }
                                                     }
-                                                    // label column — fills left side, stops before value column
-                                                    Column {
-                                                        anchors { left: parent.left; right: parent.right; rightMargin: 96; verticalCenter: parent.verticalCenter }
-                                                        spacing: 2
-                                                        Label { text: modelData.label; font.pixelSize: 12; color: textMuted; elide: Text.ElideRight; width: parent.width }
-                                                        Label { text: modelData.sub; font.pixelSize: 10; color: textMuted; visible: modelData.sub !== ""; elide: Text.ElideRight; width: parent.width }
+                                                    // Right: value — fixed 110px, truly clamped
+                                                    Label {
+                                                        text: modelData.value
+                                                        font.pixelSize: 20; font.weight: Font.Black
+                                                        color: textPrimary; font.letterSpacing: -0.5
+                                                        horizontalAlignment: Text.AlignRight
+                                                        Layout.minimumWidth: 110
+                                                        Layout.maximumWidth: 110
                                                     }
                                                 }
                                             }
@@ -1372,7 +1377,7 @@ ApplicationWindow {
                                         Label {
                                             visible: (root.analyticsObj.activeGoals || workoutStore.goals || []).length === 0
                                             Layout.fillWidth: true; wrapMode: Text.Wrap
-                                            text: "Цели добавляются из Календаря — нажмите 🎯 на нужной дате"
+                                            text: "Цели добавляются из Календаря — нажмите 🏆 на нужной дате"
                                             font.pixelSize: 11; color: textMuted
                                         }
                                     }
