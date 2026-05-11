@@ -1930,13 +1930,13 @@ def _decode_polyline(polyline_str: str) -> list:
     return coords
 
 
-# ─── AI Coach (Groq) ──────────────────────────────────────────────────────────
+# ─── AI Coach (Together AI) ───────────────────────────────────────────────────
 
 import re as _re
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_BASE    = "https://api.groq.com/openai/v1"
-GROQ_MODEL   = "llama-3.3-70b-versatile"
+AI_API_KEY = os.getenv("TOGETHER_API_KEY", "")
+AI_BASE    = "https://api.together.xyz/v1"
+AI_MODEL   = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
 
 
 def _build_ai_context(athlete_id: str, db: Session) -> dict:
@@ -2066,7 +2066,7 @@ class AiChatRequest(BaseModel):
 
 @app.get("/api/ai/status")
 def ai_status(current_user: UserDB = Depends(get_current_user)):
-    return {"available": bool(GROQ_API_KEY)}
+    return {"available": bool(AI_API_KEY)}
 
 
 @app.post("/api/ai/chat")
@@ -2075,8 +2075,8 @@ async def ai_chat(
     current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if not GROQ_API_KEY:
-        raise HTTPException(503, "GROQ_API_KEY не задан на сервере")
+    if not AI_API_KEY:
+        raise HTTPException(503, "TOGETHER_API_KEY не задан на сервере")
 
     _assert_athlete_access(current_user, data.athlete_id, db)
 
@@ -2090,20 +2090,20 @@ async def ai_chat(
     import httpx
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
-            f"{GROQ_BASE}/chat/completions",
+            f"{AI_BASE}/chat/completions",
             headers={
-                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Authorization": f"Bearer {AI_API_KEY}",
                 "Content-Type":  "application/json",
             },
             json={
-                "model":      GROQ_MODEL,
+                "model":      AI_MODEL,
                 "messages":   messages,
                 "max_tokens": 600,
             },
         )
 
     if resp.status_code != 200:
-        raise HTTPException(502, f"Groq ошибка {resp.status_code}: {resp.text[:200]}")
+        raise HTTPException(502, f"AI ошибка {resp.status_code}: {resp.text[:200]}")
 
     content = resp.json()["choices"][0]["message"]["content"]
     return {"reply": content}

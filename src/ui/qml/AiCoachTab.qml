@@ -74,7 +74,7 @@ Item {
                                 color: root.textPrimary
                             }
                             Label {
-                                text: "На базе Llama 3.3 · Groq"
+                                text: "На базе Llama 3.3 · Together AI"
                                 font.pixelSize: 11
                                 color: root.textMuted
                             }
