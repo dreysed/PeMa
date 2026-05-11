@@ -5,7 +5,7 @@ import QtQuick.Layouts
 Item {
     id: root
 
-    // ── Theme (injected from main.qml) ────────────────────────────────────────
+    // ── Theme ─────────────────────────────────────────────────────────────────
     property color bg:          "#f0f2f5"
     property color surface:     "#ffffff"
     property color surface2:    "#f6f8fa"
@@ -17,19 +17,14 @@ Item {
     property bool  dark: false
 
     // ── Store bindings ────────────────────────────────────────────────────────
-    property var    store: null  // WorkoutStore, passed from main.qml
+    property var    store: null
 
-    // Convenient aliases
-    property var    chatHistory:  store ? store.chatHistory  : []
-    property bool   aiTyping:     store ? store.aiTyping     : false
-    property var    aiModels:     store ? store.aiModels      : []
-    property string aiModel:      store ? store.aiModel       : ""
-    property bool   aiAvailable:     store ? store.aiAvailable     : false
-    property bool   ollamaInstalled: store ? store.ollamaInstalled : false
-    property bool   ollamaStarting:  store ? store.ollamaStarting  : false
-    property var    goals:        store ? store.goals          : []
-    property var    analytics:    store ? store.analyticsSummary : ({})
-    property string athleteName:  store ? store.selectedAthleteName : ""
+    property var    chatHistory: store ? store.chatHistory  : []
+    property bool   aiTyping:    store ? store.aiTyping     : false
+    property bool   aiAvailable: store ? store.aiAvailable  : false
+    property var    goals:       store ? store.goals         : []
+    property var    analytics:   store ? store.analyticsSummary : ({})
+    property string athleteName: store ? store.selectedAthleteName : ""
 
     // ── Layout ────────────────────────────────────────────────────────────────
     RowLayout {
@@ -38,10 +33,9 @@ Item {
 
         // ══ Left sidebar ══════════════════════════════════════════════════════
         Rectangle {
-            Layout.preferredWidth: 260
+            Layout.preferredWidth: 240
             Layout.fillHeight: true
             color: root.surface
-            border.width: 0
 
             Rectangle {
                 anchors.right: parent.right
@@ -62,11 +56,10 @@ Item {
                     width: sideScroll.availableWidth
                     spacing: 0
 
-                    // ── Header ────────────────────────────────────────────────
+                    // Header
                     Item {
                         width: parent.width
                         height: 64
-
                         Column {
                             anchors.left: parent.left
                             anchors.right: parent.right
@@ -74,7 +67,6 @@ Item {
                             anchors.leftMargin: 20
                             anchors.rightMargin: 20
                             spacing: 2
-
                             Label {
                                 text: "AI Тренер"
                                 font.pixelSize: 17
@@ -82,176 +74,14 @@ Item {
                                 color: root.textPrimary
                             }
                             Label {
-                                text: "Персональный помощник по тренировкам"
+                                text: "На базе Llama 3.3 · Groq"
                                 font.pixelSize: 11
                                 color: root.textMuted
-                                wrapMode: Text.Wrap
-                                width: parent.width
                             }
                         }
                     }
 
                     Rectangle { width: parent.width; height: 1; color: root.borderCol }
-
-                    Item { width: parent.width; height: 16 }
-
-                    // ── Ollama status ─────────────────────────────────────────
-                    Column {
-                        width: parent.width - 32
-                        x: 16
-                        spacing: 8
-
-                        Label {
-                            text: "OLLAMA"
-                            font.pixelSize: 9
-                            font.weight: Font.Black
-                            color: root.textMuted
-                            font.letterSpacing: 1.2
-                        }
-
-                        Rectangle {
-                            width: parent.width
-                            height: ollamaCol.implicitHeight + 20
-                            radius: 10
-                            color: root.surface2
-                            border.width: 1
-                            border.color: root.borderCol
-
-                            Column {
-                                id: ollamaCol
-                                anchors.left: parent.left
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                anchors.margins: 12
-                                spacing: 10
-
-                                // Status row
-                                RowLayout {
-                                    width: parent.width
-                                    spacing: 8
-
-                                    // Pulsing dot
-                                    Rectangle {
-                                        width: 8; height: 8; radius: 4
-                                        color: root.aiAvailable ? root.runColor
-                                             : root.ollamaStarting ? "#f59e0b"
-                                             : root.borderCol
-
-                                        SequentialAnimation on opacity {
-                                            running: root.ollamaStarting
-                                            loops: Animation.Infinite
-                                            NumberAnimation { to: 0.3; duration: 500 }
-                                            NumberAnimation { to: 1.0; duration: 500 }
-                                        }
-                                    }
-
-                                    Label {
-                                        text: root.aiAvailable    ? "Ollama запущена"
-                                            : root.ollamaStarting ? "Запускаем Ollama…"
-                                            : root.ollamaInstalled ? "Ollama не запущена"
-                                            : "Ollama не установлена"
-                                        font.pixelSize: 12
-                                        font.weight: Font.DemiBold
-                                        color: root.aiAvailable    ? root.runColor
-                                             : root.ollamaStarting ? "#f59e0b"
-                                             : root.textMuted
-                                        Layout.fillWidth: true
-                                    }
-
-                                    // Refresh button
-                                    Rectangle {
-                                        width: 28; height: 28; radius: 7
-                                        color: "transparent"
-                                        border.width: 1
-                                        border.color: root.borderCol
-                                        visible: !root.ollamaStarting
-                                        Label {
-                                            anchors.centerIn: parent
-                                            text: "↺"
-                                            font.pixelSize: 14
-                                            color: root.textMuted
-                                        }
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.store && root.store.startOllama()
-                                        }
-                                    }
-                                }
-
-                                // Model selector — only when running
-                                Column {
-                                    width: parent.width
-                                    spacing: 4
-                                    visible: root.aiAvailable && root.aiModels.length > 0
-
-                                    Label {
-                                        text: "Модель"
-                                        font.pixelSize: 10
-                                        color: root.textMuted
-                                    }
-
-                                    ComboBox {
-                                        id: modelCombo
-                                        width: parent.width
-                                        model: root.aiModels
-                                        implicitHeight: 32
-                                        currentIndex: {
-                                            var idx = root.aiModels.indexOf(root.aiModel)
-                                            return idx >= 0 ? idx : 0
-                                        }
-                                        onActivated: root.store && root.store.setAiModel(root.aiModels[currentIndex])
-                                        background: Rectangle {
-                                            radius: 7
-                                            color: root.surface
-                                            border.width: 1
-                                            border.color: root.borderCol
-                                        }
-                                        contentItem: Label {
-                                            leftPadding: 8
-                                            text: modelCombo.displayText
-                                            font.pixelSize: 12
-                                            color: root.textPrimary
-                                            verticalAlignment: Text.AlignVCenter
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-                                }
-
-                                // "Install Ollama" button — when not installed
-                                Rectangle {
-                                    width: parent.width
-                                    height: 34
-                                    radius: 8
-                                    color: root.accent
-                                    visible: !root.ollamaInstalled && !root.ollamaStarting
-
-                                    Label {
-                                        anchors.centerIn: parent
-                                        text: "Установить Ollama"
-                                        font.pixelSize: 12
-                                        font.weight: Font.DemiBold
-                                        color: "#ffffff"
-                                    }
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.store && root.store.openOllamaInstallPage()
-                                    }
-                                }
-
-                                // Hint: no models yet
-                                Label {
-                                    width: parent.width
-                                    visible: root.aiAvailable && root.aiModels.length === 0
-                                    text: "Нет загруженных моделей.\nВ терминале: ollama pull llama3.2"
-                                    font.pixelSize: 10
-                                    color: root.textMuted
-                                    wrapMode: Text.Wrap
-                                }
-                            }
-                        }
-                    }
 
                     Item { width: parent.width; height: 16 }
 
@@ -295,7 +125,7 @@ Item {
                                     elide: Text.ElideRight
                                 }
 
-                                // Goals summary
+                                // Goals
                                 Column {
                                     width: parent.width
                                     spacing: 4
@@ -334,7 +164,6 @@ Item {
                                 RowLayout {
                                     width: parent.width
                                     spacing: 0
-
                                     Repeater {
                                         model: [
                                             { label: "Тренировок", value: (root.analytics.workoutsCount || 0) + "" },
@@ -366,7 +195,7 @@ Item {
 
                     Item { width: parent.width; height: 16 }
 
-                    // ── Clear chat button ─────────────────────────────────────
+                    // ── Clear chat ────────────────────────────────────────────
                     Rectangle {
                         width: parent.width - 32
                         x: 16
@@ -382,10 +211,7 @@ Item {
                             anchors.leftMargin: 12
                             anchors.rightMargin: 12
                             spacing: 8
-                            Label {
-                                text: "🗑"
-                                font.pixelSize: 13
-                            }
+                            Label { text: "🗑"; font.pixelSize: 13 }
                             Label {
                                 text: "Новая сессия"
                                 font.pixelSize: 12
@@ -393,7 +219,6 @@ Item {
                                 Layout.fillWidth: true
                             }
                         }
-
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
@@ -416,7 +241,7 @@ Item {
                 anchors.fill: parent
                 spacing: 0
 
-                // ── Messages list ─────────────────────────────────────────────
+                // ── Messages ──────────────────────────────────────────────────
                 Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -434,25 +259,26 @@ Item {
                         }
                         Label {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: "Задайте вопрос тренеру"
+                            text: "Спросите AI тренера"
                             font.pixelSize: 16
                             font.weight: Font.DemiBold
                             color: root.textPrimary
                         }
                         Label {
                             anchors.horizontalCenter: parent.horizontalCenter
-                            text: "Он поможет составить план тренировки,\nподскажет по восстановлению и технике"
+                            text: "Составит план, подскажет по восстановлению\nи ответит на вопросы о тренировках"
                             font.pixelSize: 13
                             color: root.textMuted
                             horizontalAlignment: Text.AlignHCenter
                         }
+
+                        Item { width: 1; height: 4 }
 
                         // Suggestion chips
                         Flow {
                             anchors.horizontalCenter: parent.horizontalCenter
                             width: 460
                             spacing: 8
-
                             Repeater {
                                 model: [
                                     "Составь план на эту неделю",
@@ -467,7 +293,6 @@ Item {
                                     color: root.surface
                                     border.width: 1
                                     border.color: root.borderCol
-
                                     Label {
                                         id: chipLabel
                                         anchors.centerIn: parent
@@ -475,7 +300,6 @@ Item {
                                         font.pixelSize: 12
                                         color: root.accent
                                     }
-
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
@@ -489,7 +313,7 @@ Item {
                         }
                     }
 
-                    // Messages scroll view
+                    // Messages
                     ScrollView {
                         id: chatScroll
                         anchors.fill: parent
@@ -505,7 +329,6 @@ Item {
 
                             Repeater {
                                 model: root.chatHistory
-
                                 delegate: Item {
                                     width: chatCol.width - 40
                                     height: bubble.implicitHeight + 8
@@ -520,7 +343,6 @@ Item {
                                         implicitHeight: bubbleText.implicitHeight + 18
                                         radius: 12
                                         color: isUser ? root.accent : root.surface
-
                                         border.width: isUser ? 0 : 1
                                         border.color: root.borderCol
 
@@ -556,26 +378,19 @@ Item {
                                 width: chatCol.width - 40
                                 height: 48
                                 visible: root.aiTyping
-
                                 Rectangle {
-                                    width: 72
-                                    height: 36
-                                    radius: 12
+                                    width: 72; height: 36; radius: 12
                                     color: root.surface
-                                    border.width: 1
-                                    border.color: root.borderCol
-
+                                    border.width: 1; border.color: root.borderCol
                                     Row {
                                         anchors.centerIn: parent
                                         spacing: 6
-
                                         Repeater {
                                             model: 3
                                             delegate: Rectangle {
                                                 width: 7; height: 7; radius: 4
                                                 color: root.textMuted
                                                 opacity: 0.4
-
                                                 SequentialAnimation on opacity {
                                                     running: root.aiTyping
                                                     loops: Animation.Infinite
@@ -594,7 +409,6 @@ Item {
                         }
                     }
 
-                    // Auto-scroll to bottom when new messages arrive
                     Connections {
                         target: root
                         function onChatHistoryChanged() {
@@ -612,7 +426,6 @@ Item {
                     Layout.fillWidth: true
                     height: inputRow.implicitHeight + 24
                     color: root.surface
-                    border.width: 0
 
                     Rectangle {
                         anchors.left: parent.left
@@ -639,10 +452,10 @@ Item {
 
                             TextArea {
                                 id: msgField
-                                placeholderText: root.aiAvailable
-                                    ? "Спросите тренера о тренировках..."
-                                    : "Сначала запустите Ollama"
-                                enabled: root.aiAvailable && !root.aiTyping
+                                placeholderText: root.aiTyping
+                                    ? "AI думает…"
+                                    : "Спросите тренера о тренировках…"
+                                enabled: !root.aiTyping
                                 font.pixelSize: 13
                                 color: root.textPrimary
                                 wrapMode: TextArea.Wrap
@@ -653,10 +466,8 @@ Item {
                                     border.color: msgField.activeFocus ? root.accent : root.borderCol
                                     Behavior on border.color { ColorAnimation { duration: 120 } }
                                 }
-                                leftPadding: 12
-                                rightPadding: 12
-                                topPadding: 10
-                                bottomPadding: 10
+                                leftPadding: 12; rightPadding: 12
+                                topPadding: 10; bottomPadding: 10
 
                                 Keys.onPressed: function(event) {
                                     if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
@@ -669,10 +480,8 @@ Item {
                         }
 
                         Rectangle {
-                            width: 40
-                            height: 40
-                            radius: 10
-                            color: (msgField.text.trim().length > 0 && root.aiAvailable && !root.aiTyping)
+                            width: 40; height: 40; radius: 10
+                            color: (msgField.text.trim().length > 0 && !root.aiTyping)
                                    ? root.accent : root.borderCol
                             Behavior on color { ColorAnimation { duration: 150 } }
 
@@ -683,11 +492,10 @@ Item {
                                 font.weight: Font.Bold
                                 color: "#ffffff"
                             }
-
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                enabled: msgField.text.trim().length > 0 && root.aiAvailable && !root.aiTyping
+                                enabled: msgField.text.trim().length > 0 && !root.aiTyping
                                 onClicked: sendMessage()
                             }
                         }
@@ -697,22 +505,10 @@ Item {
         }
     }
 
-    // ── Helper ────────────────────────────────────────────────────────────────
     function sendMessage() {
         const text = msgField.text.trim()
         if (!text || !root.store || root.aiTyping) return
         root.store.sendAiMessage(text)
         msgField.text = ""
-    }
-
-    // Auto-start Ollama when tab is first shown
-    Component.onCompleted: {
-        if (root.store) root.store.startOllama()
-    }
-
-    // Re-check when tab becomes visible again
-    onVisibleChanged: {
-        if (visible && root.store && !root.aiAvailable && !root.ollamaStarting)
-            root.store.startOllama()
     }
 }

@@ -8,6 +8,19 @@ from __future__ import annotations
 import calendar as cal_module
 import json
 import os
+
+# Load .env if present (development convenience)
+try:
+    from pathlib import Path as _Path
+    _env = _Path(__file__).parent / ".env"
+    if _env.exists():
+        for _line in _env.read_text().splitlines():
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                os.environ.setdefault(_k.strip(), _v.strip())
+except Exception:
+    pass
 import uuid
 from datetime import date as Date, datetime, timedelta
 from typing import Optional
@@ -1916,4 +1929,183 @@ def _decode_polyline(polyline_str: str) -> list:
         coords.append([lng / 1e5, lat / 1e5])  # [lon, lat] for GeoJSON
     return coords
 
+
+# ─── AI Coach (Groq) ──────────────────────────────────────────────────────────
+
+import re as _re
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_BASE    = "https://api.groq.com/openai/v1"
+GROQ_MODEL   = "llama-3.3-70b-versatile"
+
+
+def _build_ai_context(athlete_id: str, db: Session) -> dict:
+    today = Date.today()
+
+    # Recent workouts (last 21 days)
+    since = (today - timedelta(days=21)).strftime("%Y-%m-%d")
+    recent = db.query(WorkoutDB).filter(
+        WorkoutDB.athlete_id == athlete_id,
+        WorkoutDB.date >= since,
+    ).order_by(WorkoutDB.date.desc()).limit(14).all()
+
+    recent_list = [
+        {
+            "date":         w.date,
+            "category":     w.category,
+            "title":        w.title,
+            "distance_km":  _effective_distance(w),
+            "duration_min": _effective_duration(w),
+            "intensity":    w.intensity,
+            "status":       w.status,
+        }
+        for w in recent
+    ]
+
+    # Active goals
+    goals_list = [
+        {
+            "title":       g.title,
+            "targetDate":  g.target_date,
+            "targetValue": g.target_value,
+            "targetUnit":  g.target_unit,
+        }
+        for g in db.query(GoalDB).filter(
+            GoalDB.athlete_id == athlete_id,
+            GoalDB.completed_at.is_(None),
+        ).order_by(GoalDB.target_date).all()
+    ]
+
+    # Pain points from recent feedback
+    pain_labels = {
+        "head": "Голова", "neck": "Шея",
+        "lshoulder": "Лев. плечо", "rshoulder": "Прав. плечо",
+        "chest": "Грудь/пресс", "lback": "Поясница",
+        "lelbow": "Лев. локоть", "relbow": "Прав. локоть",
+        "lwrist": "Лев. запястье", "rwrist": "Прав. запястье",
+        "lhip": "Лев. бедро", "rhip": "Прав. бедро",
+        "lknee": "Лев. колено", "rknee": "Прав. колено",
+        "lshin": "Лев. голень", "rshin": "Прав. голень",
+        "lankle": "Лев. лодыжка", "rankle": "Прав. лодыжка",
+    }
+    pain_ids: set[str] = set()
+    for w in recent:
+        m = _re.search(r"\[PainIds:([^\]]*)\]", w.feedback or "")
+        if m:
+            for pid in m.group(1).split(","):
+                pid = pid.strip()
+                if pid:
+                    pain_ids.add(pid)
+    pain_human = [pain_labels.get(p, p) for p in pain_ids]
+
+    # 30-day stats
+    since30 = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+    done30  = db.query(WorkoutDB).filter(
+        WorkoutDB.athlete_id == athlete_id,
+        WorkoutDB.date >= since30,
+        WorkoutDB.status == "done",
+    ).all()
+    dist30 = round(sum(_effective_distance(w) for w in done30), 1)
+    dur30  = sum(_effective_duration(w) for w in done30)
+
+    # Athlete name
+    athlete = db.query(AthleteDB).filter(AthleteDB.id == athlete_id).first()
+    user    = db.query(UserDB).filter(UserDB.id == athlete.user_id).first() if athlete else None
+
+    return {
+        "name":            user.name if user else "Атлет",
+        "goals":           goals_list,
+        "pain_points":     pain_human,
+        "recent_workouts": recent_list,
+        "stats": {
+            "workoutsCount": len(done30),
+            "distanceTotal": dist30,
+            "durationTotal": dur30,
+        },
+    }
+
+
+def _build_system_prompt(ctx: dict) -> str:
+    goals_str = "\n".join([
+        f"  - {g['title']} (до {g['targetDate']}"
+        + (f", цель: {g['targetValue']} {g['targetUnit']}" if g.get("targetValue") else "")
+        + ")"
+        for g in ctx.get("goals", [])
+    ]) or "  Цели не заданы"
+
+    injuries_str = ", ".join(ctx.get("pain_points", [])) or "Нет"
+
+    recent_str = "\n".join([
+        f"  - {w['date']}: {w['category']} {w['distance_km']} км"
+        f" {w['duration_min']} мин [{w['status']}]"
+        for w in ctx.get("recent_workouts", [])[:7]
+    ]) or "  Нет данных"
+
+    stats = ctx.get("stats", {})
+    return (
+        f"Ты персональный AI тренер в приложении PeMa. Помогаешь атлету улучшать результаты.\n\n"
+        f"ВАЖНО: Отвечай ТОЛЬКО на вопросы о тренировках, спорте, восстановлении, "
+        f"спортивном питании и здоровье атлета. На другие темы вежливо откажись.\n\n"
+        f"Профиль атлета: {ctx.get('name', 'Атлет')}\n\n"
+        f"Активные цели:\n{goals_str}\n\n"
+        f"Болевые точки и травмы: {injuries_str}\n\n"
+        f"Последние тренировки:\n{recent_str}\n\n"
+        f"Статистика за 30 дней: {stats.get('workoutsCount', 0)} тренировок, "
+        f"{stats.get('distanceTotal', 0)} км, {stats.get('durationTotal', 0)} мин.\n\n"
+        f"Правила: будь конкретным и кратким. Отвечай на русском языке. Не превышай 400 слов."
+    )
+
+
+class AiMessage(BaseModel):
+    role: str
+    content: str
+
+class AiChatRequest(BaseModel):
+    athlete_id: str
+    messages: list[AiMessage]
+
+
+@app.get("/api/ai/status")
+def ai_status(current_user: UserDB = Depends(get_current_user)):
+    return {"available": bool(GROQ_API_KEY)}
+
+
+@app.post("/api/ai/chat")
+async def ai_chat(
+    data: AiChatRequest,
+    current_user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not GROQ_API_KEY:
+        raise HTTPException(503, "GROQ_API_KEY не задан на сервере")
+
+    _assert_athlete_access(current_user, data.athlete_id, db)
+
+    ctx           = _build_ai_context(data.athlete_id, db)
+    system_prompt = _build_system_prompt(ctx)
+
+    messages = [{"role": "system", "content": system_prompt}] + [
+        {"role": m.role, "content": m.content} for m in data.messages
+    ]
+
+    import httpx
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{GROQ_BASE}/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type":  "application/json",
+            },
+            json={
+                "model":      GROQ_MODEL,
+                "messages":   messages,
+                "max_tokens": 600,
+            },
+        )
+
+    if resp.status_code != 200:
+        raise HTTPException(502, f"Groq ошибка {resp.status_code}: {resp.text[:200]}")
+
+    content = resp.json()["choices"][0]["message"]["content"]
+    return {"reply": content}
 

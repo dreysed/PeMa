@@ -37,3 +37,7 @@ venv/
 # Old / unused
 SportCal.command
 web/
+
+# Secrets — never commit
+.env
+api/.env
