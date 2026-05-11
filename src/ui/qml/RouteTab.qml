@@ -24,6 +24,28 @@ Item {
     property bool   stravaHasClientId: false
     property var    selectedRoute:  null
 
+    // ── Generation-batch tracking ─────────────────────────────────────────────
+    // After each generation we mark the newest N routes as "варианты"
+    property int  _batchSize:       0     // how many fresh routes to highlight
+    property bool _wasGenerating:   false // flag: generation was in progress
+
+    onIsBusyChanged: {
+        if (routeTab.isBusy) {
+            routeTab._wasGenerating = true
+        } else if (routeTab._wasGenerating) {
+            routeTab._wasGenerating = false
+            routeTab._batchSize = 3   // newest 3 are the fresh variants
+            // Auto-select the first new route so the map updates immediately
+            if (routeTab.routesModel.length > 0)
+                routeTab.selectedRoute = routeTab.routesModel[0]
+        }
+    }
+    onRoutesModelChanged: {
+        // If a fresh batch just arrived, refresh auto-selection
+        if (routeTab._batchSize > 0 && routeTab.routesModel.length > 0)
+            routeTab.selectedRoute = routeTab.routesModel[0]
+    }
+
     // ── Signals ───────────────────────────────────────────────────────────────
     signal generateRequested(real lat, real lon, real distKm, string prefs)
     signal deleteRouteRequested(string id)
@@ -360,55 +382,137 @@ Item {
                         }
                     }
 
-                    // ── Saved routes ───────────────────────────────────────────
+                    // ── Route list (variants + saved) ─────────────────────────
                     ColumnLayout {
                         Layout.fillWidth: true; Layout.topMargin: 16; spacing: 0
 
+                        // ── "НОВЫЕ ВАРИАНТЫ" header — shown after generation ────
                         RowLayout {
+                            visible: routeTab._batchSize > 0 && routeTab.routesModel.length > 0
                             Layout.leftMargin: 20; Layout.rightMargin: 20; Layout.fillWidth: true
                             Label {
-                                text: "СОХРАНЁННЫЕ"
+                                text: "НОВЫЕ ВАРИАНТЫ"
                                 font.pixelSize: 9; font.weight: Font.Black
-                                color: textMuted; font.letterSpacing: 1.2
+                                color: accent; font.letterSpacing: 1.2
+                            }
+                            Item { Layout.fillWidth: true }
+                            // Dismiss variants highlight
+                            Label {
+                                text: "скрыть"
+                                font.pixelSize: 9; color: textMuted
+                                MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
+                                    onClicked: routeTab._batchSize = 0 }
                             }
                         }
 
-                        Item { height: 8 }
+                        Item { height: 4; visible: routeTab._batchSize > 0 && routeTab.routesModel.length > 0 }
 
                         Repeater {
                             model: routeTab.routesModel
                             delegate: Rectangle {
-                                width: parent.width; height: 64
-                                color: routeTab.selectedRoute && routeTab.selectedRoute.id === modelData.id
-                                       ? (dark ? "#16123a" : "#f5f3ff") : "transparent"
+                                id: routeDelegate
+                                property bool isNew: index < routeTab._batchSize
+                                property bool isSelected: routeTab.selectedRoute
+                                                          && routeTab.selectedRoute.id === modelData.id
+
+                                width: parent.width
+                                height: isNew ? 72 : 64
+
+                                color: isSelected
+                                       ? (dark ? "#16123a" : "#f5f3ff")
+                                       : isNew ? (dark ? "#1a1a2e" : "#fafafe") : "transparent"
+
+                                // Left accent bar — thicker + brighter for new variants
+                                Rectangle {
+                                    anchors { left: parent.left; top: parent.top; bottom: parent.bottom; leftMargin: 0 }
+                                    width: isNew ? 4 : 3
+                                    color: isNew ? accent : (isSelected ? accent : borderCol)
+                                    opacity: isNew ? 1 : (isSelected ? 0.8 : 0)
+                                }
 
                                 // Bottom separator
                                 Rectangle {
                                     anchors { left: parent.left; right: parent.right; bottom: parent.bottom; leftMargin: 20; rightMargin: 20 }
-                                    height: 1; color: borderCol; opacity: 0.7
+                                    height: 1; color: borderCol; opacity: 0.6
                                 }
 
                                 RowLayout {
-                                    anchors { fill: parent; leftMargin: 20; rightMargin: 16 }
+                                    anchors { fill: parent; leftMargin: 20; rightMargin: 14 }
                                     spacing: 10
-                                    Rectangle { width: 3; height: 36; radius: 2; color: accent }
+
                                     ColumnLayout {
                                         Layout.fillWidth: true; spacing: 2
-                                        Label { text: modelData.name || "Маршрут"; font.pixelSize: 13; font.weight: Font.DemiBold; color: textPrimary; elide: Text.ElideRight; Layout.fillWidth: true }
-                                        Label { text: (modelData.distanceKm || 0).toFixed(1) + " км"; font.pixelSize: 11; color: textMuted }
+                                        RowLayout {
+                                            spacing: 6
+                                            Label {
+                                                text: modelData.name || "Маршрут"
+                                                font.pixelSize: 13; font.weight: Font.DemiBold
+                                                color: textPrimary; elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+                                            // "НОВЫЙ" badge on fresh variants
+                                            Rectangle {
+                                                visible: isNew
+                                                height: 16; width: newBadgeLbl.implicitWidth + 8; radius: 4
+                                                color: accent
+                                                Label {
+                                                    id: newBadgeLbl; anchors.centerIn: parent
+                                                    text: "NEW"; font.pixelSize: 8
+                                                    font.weight: Font.Black; color: "#fff"
+                                                    font.letterSpacing: 0.5
+                                                }
+                                            }
+                                        }
+                                        Label {
+                                            text: (modelData.distanceKm || 0).toFixed(1) + " км"
+                                                  + (modelData.description && !isNew ? "  ·  " + modelData.description : "")
+                                            font.pixelSize: 11; color: textMuted
+                                            elide: Text.ElideRight; Layout.fillWidth: true
+                                        }
                                     }
+
+                                    // Delete button
                                     Rectangle {
                                         width: 26; height: 26; radius: 6
                                         color: surface2; border.width: 1; border.color: borderCol
                                         Label { anchors.centerIn: parent; text: "×"; font.pixelSize: 14; color: textMuted }
                                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                                            onClicked: routeTab.deleteRouteRequested(modelData.id) }
+                                            onClicked: {
+                                                if (routeTab._batchSize > 0) routeTab._batchSize = Math.max(0, routeTab._batchSize - 1)
+                                                routeTab.deleteRouteRequested(modelData.id)
+                                            }
+                                        }
                                     }
                                 }
                                 MouseArea { anchors.fill: parent; z: -1; cursorShape: Qt.PointingHandCursor
                                     onClicked: routeTab.selectedRoute = modelData }
                             }
                         }
+
+                        // Separator between variants and older routes
+                        Rectangle {
+                            visible: routeTab._batchSize > 0 && routeTab.routesModel.length > routeTab._batchSize
+                            Layout.fillWidth: true; Layout.leftMargin: 20; Layout.rightMargin: 20
+                            Layout.topMargin: 8; height: 1; color: borderCol
+                        }
+                        Label {
+                            visible: routeTab._batchSize > 0 && routeTab.routesModel.length > routeTab._batchSize
+                            Layout.leftMargin: 20; Layout.topMargin: 6
+                            text: "РАНЕЕ СОХРАНЁННЫЕ"
+                            font.pixelSize: 9; font.weight: Font.Black
+                            color: textMuted; font.letterSpacing: 1.2
+                        }
+                        Item { height: 4; visible: routeTab._batchSize > 0 }
+
+                        // Header when no batch
+                        Label {
+                            visible: routeTab._batchSize === 0 && routeTab.routesModel.length > 0
+                            Layout.leftMargin: 20
+                            text: "СОХРАНЁННЫЕ"
+                            font.pixelSize: 9; font.weight: Font.Black
+                            color: textMuted; font.letterSpacing: 1.2
+                        }
+                        Item { height: 4; visible: routeTab._batchSize === 0 && routeTab.routesModel.length > 0 }
 
                         Label {
                             Layout.alignment: Qt.AlignHCenter; Layout.topMargin: 20

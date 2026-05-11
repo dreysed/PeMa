@@ -1405,6 +1405,7 @@ class RouteGenerateRequest(BaseModel):
     start_lon: float
     distance_km: float
     preferences: str = ""
+    count: int = 3          # number of variants to generate (1–5)
 
 
 class OpenAiKeyRequest(BaseModel):
@@ -1445,7 +1446,10 @@ def get_routes(
     current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    routes = db.query(RouteDB).filter(RouteDB.user_id == current_user.id).all()
+    routes = (db.query(RouteDB)
+               .filter(RouteDB.user_id == current_user.id)
+               .order_by(RouteDB.created_at.desc())
+               .all())
     return [_route_to_dict(r) for r in routes]
 
 
@@ -1481,6 +1485,60 @@ def get_openai_key_status(
     return {"hasKey": bool(current_user.openai_key)}
 
 
+def _generate_one_route(lat: float, lon: float, target_km: float,
+                         preferences: str, locality_name: str,
+                         user_id: str, db) -> "RouteDB":
+    """Build and persist a single randomised circular route. Called N times per request."""
+    import math, random, httpx
+
+    n_points  = random.randint(3, 4)
+    radius_km = target_km / (2 * math.pi)
+    dlat = radius_km / 111.0
+    dlon = radius_km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+    start_angle = random.uniform(0, 2 * math.pi)
+
+    waypoints: list = [[lon, lat]]
+    for i in range(1, n_points + 1):
+        angle   = start_angle + 2 * math.pi * i / n_points
+        perturb = random.uniform(0.75, 1.25)
+        waypoints.append([lon + dlon * perturb * math.cos(angle),
+                           lat + dlat * perturb * math.sin(angle)])
+    waypoints.append([lon, lat])
+
+    coords_str    = ";".join(f"{p[0]},{p[1]}" for p in waypoints)
+    geojson_coords = waypoints
+    actual_dist   = _haversine_km(waypoints)
+
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(
+                f"http://router.project-osrm.org/route/v1/foot/{coords_str}"
+                f"?overview=full&geometries=geojson&continue_straight=false"
+            )
+        if resp.status_code == 200:
+            routes = resp.json().get("routes", [])
+            if routes:
+                geojson_coords = routes[0]["geometry"]["coordinates"]
+                actual_dist    = routes[0].get("distance", 0) / 1000.0
+    except Exception:
+        pass
+
+    route_name  = f"{locality_name} · {actual_dist:.1f} км" if locality_name else f"Маршрут {actual_dist:.1f} км"
+    description = f"Круговой маршрут {actual_dist:.1f} км"
+    if preferences:
+        description += f" · {preferences}"
+
+    route = RouteDB(
+        id=new_id(), user_id=user_id, name=route_name,
+        distance_km=round(actual_dist, 2),
+        geojson=json.dumps({"type": "LineString", "coordinates": geojson_coords}),
+        description=description, start_lat=lat, start_lon=lon,
+        created_at=datetime.utcnow().isoformat(),
+    )
+    db.add(route); db.commit(); db.refresh(route)
+    return route
+
+
 @app.post("/api/routes/generate")
 def generate_route(
     data: RouteGenerateRequest,
@@ -1488,40 +1546,16 @@ def generate_route(
     db: Session = Depends(get_db),
 ):
     """
-    Generate a circular running route using geometric waypoints + OSRM road snapping.
-    No AI or paid API required — completely free.
+    Generate N circular running route variants (default 3).
+    Returns an array so the client can show all variants for selection.
     """
-    import math, random, httpx
+    import httpx
 
-    lat = data.start_lat
-    lon = data.start_lon
-    target_km = data.distance_km
+    lat, lon, target_km = data.start_lat, data.start_lon, data.distance_km
+    count = max(1, min(data.count, 5))
 
-    # ── Step 1: Generate circular waypoints (randomised each call) ──────────────
-    # 3 intermediate points (triangle loop) — fewer constraints let OSRM find
-    # a cleaner path without tight detours or dead-end alleys.
-    # Vary the count between 3 and 4 for some shape variety.
-    n_points = random.randint(3, 4)
-    radius_km = target_km / (2 * math.pi)
-
-    dlat = radius_km / 111.0
-    dlon = radius_km / (111.0 * max(math.cos(math.radians(lat)), 0.01))
-
-    # Random starting angle → route points in a different direction every time
-    start_angle = random.uniform(0, 2 * math.pi)
-
-    waypoints: list = [[lon, lat]]
-    for i in range(1, n_points + 1):
-        base_angle = start_angle + 2 * math.pi * i / n_points
-        # Perturb each vertex's radius ±25% for organic-looking variation
-        perturb = random.uniform(0.75, 1.25)
-        wlat = lat + dlat * perturb * math.sin(base_angle)
-        wlon = lon + dlon * perturb * math.cos(base_angle)
-        waypoints.append([wlon, wlat])
-    waypoints.append([lon, lat])   # close the loop
-
-    # ── Step 2: Reverse-geocode start to get location name (Nominatim, free) ───
-    route_name = f"Маршрут {target_km:.0f} км"
+    # Reverse-geocode once — reuse locality name for all variants
+    locality_name = ""
     try:
         with httpx.Client(timeout=6, headers={"User-Agent": "PeMa/2.0"}) as client:
             nom = client.get(
@@ -1530,58 +1564,23 @@ def generate_route(
             )
         if nom.status_code == 200:
             addr = nom.json().get("address", {})
-            locality = (
+            locality_name = (
                 addr.get("suburb") or addr.get("neighbourhood") or
                 addr.get("city_district") or addr.get("village") or
                 addr.get("town") or addr.get("city", "")
             )
-            if locality:
-                route_name = f"{locality} · {target_km:.0f} км"
     except Exception:
         pass
 
-    # ── Step 3: Snap to road network via OSRM (free public server) ─────────────
-    coords_str = ";".join(f"{p[0]},{p[1]}" for p in waypoints)
-    geojson_coords = waypoints   # fallback: geometric polygon
-    actual_dist = _haversine_km(waypoints)  # Haversine fallback (better than target_km)
+    results = []
+    for _ in range(count):
+        route = _generate_one_route(
+            lat, lon, target_km, data.preferences, locality_name,
+            current_user.id, db
+        )
+        results.append(_route_to_dict(route))
 
-    try:
-        with httpx.Client(timeout=15) as client:
-            osrm_resp = client.get(
-                f"http://router.project-osrm.org/route/v1/foot/{coords_str}"
-                f"?overview=full&geometries=geojson&continue_straight=false"
-            )
-        if osrm_resp.status_code == 200:
-            osrm_data = osrm_resp.json()
-            osrm_routes = osrm_data.get("routes", [])
-            if osrm_routes:
-                geojson_coords = osrm_routes[0]["geometry"]["coordinates"]
-                actual_dist = osrm_routes[0].get("distance", 0) / 1000.0
-    except Exception:
-        pass   # offline / unavailable → use geometric waypoints
-
-    description = f"Круговой маршрут {actual_dist:.1f} км по дорогам"
-    if data.preferences:
-        description += f" · {data.preferences}"
-
-    geojson = json.dumps({"type": "LineString", "coordinates": geojson_coords})
-
-    # ── Step 4: Persist ─────────────────────────────────────────────────────────
-    route = RouteDB(
-        id=new_id(),
-        user_id=current_user.id,
-        name=route_name,
-        distance_km=round(actual_dist, 2),
-        geojson=geojson,
-        description=description,
-        start_lat=lat,
-        start_lon=lon,
-        created_at=datetime.utcnow().isoformat(),
-    )
-    db.add(route)
-    db.commit()
-    db.refresh(route)
-    return _route_to_dict(route)
+    return results   # ← array, not a single object
 
 
 # ── Custom waypoints route (from map editor) ──────────────────────────────────
