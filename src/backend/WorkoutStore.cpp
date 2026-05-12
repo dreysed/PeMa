@@ -780,7 +780,13 @@ bool WorkoutStore::markWorkoutStatusDetailed(
                               QStringLiteral("/api/workouts/") + workoutId
                               + QStringLiteral("/status"), body);
     const bool ok = doc.isObject();
-    if (ok) { fetchCalendar(); fetchDayWorkouts(); fetchSelectedWorkout(); }
+    if (ok) {
+        fetchCalendar();
+        fetchDayWorkouts();
+        fetchSelectedWorkout();
+        fetchAnalytics();   // refresh goal progress + stats
+        fetchGoals();       // refresh goals list
+    }
     return ok;
 }
 

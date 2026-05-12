@@ -1184,9 +1184,12 @@ def get_analytics(
     by_intensity = {"easy": 0, "moderate": 0, "hard": 0}
     by_category  = {"run": 0, "bike": 0, "swim": 0}
     by_status    = {"planned": 0, "done": 0, "skipped": 0}
-    for w in workouts:
+    # byIntensity / byCategory — only completed workouts (shows actual effort, not plan)
+    for w in done:
         by_intensity[w.intensity] = by_intensity.get(w.intensity, 0) + 1
         by_category[w.category]   = by_category.get(w.category,   0) + 1
+    # byStatus — all workouts (planned + done + skipped for completion rate display)
+    for w in workouts:
         by_status[w.status]       = by_status.get(w.status,       0) + 1
 
     distance_total = sum(_effective_distance(w) for w in done)
@@ -2049,19 +2052,50 @@ def _build_ai_context(athlete_id: str, db: Session) -> dict:
         for w in upcoming
     ]
 
-    # Active goals
-    goals_list = [
-        {
-            "title":       g.title,
-            "targetDate":  g.target_date,
-            "targetValue": g.target_value,
-            "targetUnit":  g.target_unit,
-        }
-        for g in db.query(GoalDB).filter(
-            GoalDB.athlete_id == athlete_id,
-            GoalDB.completed_at.is_(None),
-        ).order_by(GoalDB.target_date).all()
-    ]
+    # Active goals — include computed progress so AI gives accurate advice
+    all_done_for_goals = db.query(WorkoutDB).filter(
+        WorkoutDB.athlete_id == athlete_id,
+        WorkoutDB.status == "done",
+    ).all()
+    goals_list = []
+    for g in db.query(GoalDB).filter(
+        GoalDB.athlete_id == athlete_id,
+        GoalDB.completed_at.is_(None),
+    ).order_by(GoalDB.target_date).all():
+        try:
+            goal_created = Date.fromisoformat(g.created_at[:10])
+        except Exception:
+            goal_created = today
+        done_since = [w for w in all_done_for_goals
+                      if Date.fromisoformat(w.date) >= goal_created]
+        progress = 0.0
+        progress_label = ""
+        if g.target_value:
+            unit = (g.target_unit or "km").lower()
+            if unit == "km":
+                actual = round(sum(_effective_distance(w) for w in done_since), 1)
+                progress = min(1.0, round(actual / g.target_value, 3))
+                progress_label = f"{actual} / {g.target_value} км"
+            elif unit in ("min", "мин"):
+                actual = sum(_effective_duration(w) for w in done_since)
+                progress = min(1.0, round(actual / g.target_value, 3))
+                progress_label = f"{actual} / {int(g.target_value)} мин"
+            elif unit == "runs":
+                actual = len(done_since)
+                progress = min(1.0, round(actual / g.target_value, 3))
+                progress_label = f"{actual} / {int(g.target_value)} пробежек"
+            else:
+                actual = round(sum(_effective_distance(w) for w in done_since), 1)
+                progress = min(1.0, round(actual / g.target_value, 3))
+                progress_label = f"{actual} / {g.target_value}"
+        goals_list.append({
+            "title":         g.title,
+            "targetDate":    g.target_date,
+            "targetValue":   g.target_value,
+            "targetUnit":    g.target_unit,
+            "progress":      progress,
+            "progressLabel": progress_label,
+        })
 
     # Pain points from recent feedback
     pain_labels = {
@@ -2113,10 +2147,11 @@ def _build_ai_context(athlete_id: str, db: Session) -> dict:
     }
 
 
-def _build_system_prompt(ctx: dict) -> str:
+def _build_system_prompt(ctx: dict, user_role: str = "coach") -> str:
     goals_str = "\n".join([
         f"  - {g['title']} (до {g['targetDate']}"
         + (f", цель: {g['targetValue']} {g['targetUnit']}" if g.get("targetValue") else "")
+        + (f", прогресс: {int(g.get('progress', 0) * 100)}% [{g.get('progressLabel','')}]" if g.get("progressLabel") else "")
         + ")"
         for g in ctx.get("goals", [])
     ]) or "  Цели не заданы"
@@ -2138,25 +2173,50 @@ def _build_system_prompt(ctx: dict) -> str:
 
     stats = ctx.get("stats", {})
     today = ctx.get("today", "")
+    athlete_name = ctx.get("name", "Атлет")
+
+    is_athlete = user_role == "athlete"
+
+    if is_athlete:
+        # Talking directly to the athlete — no calendar editing, personal tone
+        role_intro = (
+            f"Ты персональный AI тренер в приложении PeMa. Ты разговариваешь НАПРЯМУЮ с атлетом "
+            f"по имени {athlete_name}.\n"
+            f"Обращайся к нему от второго лица («ты», «твои тренировки»).\n"
+            f"Не упоминай тренера и не предлагай «спросить тренера» — атлет общается только с тобой.\n"
+            f"Не говори атлету что ты что-то изменишь в плане — ты только советуешь.\n"
+        )
+        editing_instructions = "Поле actions ВСЕГДА = []. Ты не вносишь изменения в план самостоятельно."
+    else:
+        # Talking to the coach — full editing capability
+        role_intro = (
+            f"Ты персональный AI тренер в приложении PeMa. Ты разговариваешь с ТРЕНЕРОМ.\n"
+            f"Тренер управляет планом атлета {athlete_name}.\n"
+        )
+        editing_instructions = (
+            f"Поле actions заполняй ТОЛЬКО когда тренер просит изменить план:\n"
+            f'  Создать: {{"type":"create","date":"YYYY-MM-DD","title":"...","category":"run|bike|swim","distance_km":0,"duration_min":0,"intensity":"easy|moderate|hard","notes":"..."}}\n'
+            f'  Изменить: {{"type":"update","workout_id":"...","title":"...","distance_km":0,...}}\n'
+            f'  Удалить: {{"type":"delete","workout_id":"..."}}\n'
+            f"Иначе actions = []."
+        )
+
     return (
-        f"Ты персональный AI тренер в приложении PeMa. Помогаешь атлету планировать тренировки.\n"
+        f"{role_intro}"
         f"Сегодня: {today}\n\n"
         f"ВАЖНО: Отвечай ТОЛЬКО на вопросы о тренировках, спорте, восстановлении и питании.\n"
         f"На другие темы вежливо откажись.\n\n"
-        f"Профиль атлета: {ctx.get('name', 'Атлет')}\n"
+        f"Атлет: {athlete_name}\n"
         f"Активные цели:\n{goals_str}\n"
-        f"Болевые точки: {injuries_str}\n"
+        f"Болевые точки / жалобы: {injuries_str}\n"
         f"Последние тренировки:\n{recent_str}\n"
-        f"Предстоящие тренировки (используй workout_id для изменений):\n{upcoming_str}\n"
+        f"Предстоящие тренировки (workout_id для редактирования):\n{upcoming_str}\n"
         f"Статистика 30 дней: {stats.get('workoutsCount', 0)} тренировок, "
         f"{stats.get('distanceTotal', 0)} км, {stats.get('durationTotal', 0)} мин.\n\n"
         f"ФОРМАТ ОТВЕТА — строго JSON без markdown:\n"
-        f'{{"message": "текст ответа атлету на русском", "actions": []}}\n\n'
-        f"Поле actions заполняй ТОЛЬКО когда нужно изменить план:\n"
-        f'  Создать: {{"type":"create","date":"YYYY-MM-DD","title":"...","category":"run|bike|swim","distance_km":0,"duration_min":0,"intensity":"easy|moderate|hard","notes":"..."}}\n'
-        f'  Изменить: {{"type":"update","workout_id":"...","title":"...","distance_km":0,...}}\n'
-        f'  Удалить: {{"type":"delete","workout_id":"..."}}\n'
-        f"Иначе actions = []. Не превышай 250 слов в message."
+        f'{{"message": "текст ответа на русском", "actions": []}}\n\n'
+        f"{editing_instructions}\n"
+        f"Не превышай 250 слов в message."
     )
 
 
@@ -2186,7 +2246,7 @@ async def ai_chat(
     _assert_athlete_access(current_user, data.athlete_id, db)
 
     ctx           = _build_ai_context(data.athlete_id, db)
-    system_prompt = _build_system_prompt(ctx)
+    system_prompt = _build_system_prompt(ctx, user_role=current_user.role)
 
     loop_messages = [{"role": "system", "content": system_prompt}] + [
         {"role": m.role, "content": m.content} for m in data.messages
@@ -2234,6 +2294,10 @@ async def ai_chat(
         message = parsed.get("message", raw_content)
         actions = parsed.get("actions") or []
         for action in actions:
+            # Athletes cannot modify the training plan via AI
+            if current_user.role == "athlete":
+                print(f"[AI] Athlete action blocked: {action.get('type')}")
+                continue
             result = _ai_execute_action(action, data.athlete_id, db)
             print(f"[AI] Action {action.get('type')}: {result}")
             changes_made = True
