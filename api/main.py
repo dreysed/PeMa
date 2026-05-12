@@ -1852,19 +1852,34 @@ def strava_sync(
     except httpx.RequestError as e:
         raise HTTPException(502, f"Ошибка сети: {e}")
 
+    # Determine target athlete once (same for all activities in the sync)
+    target_athlete_id = current_user.athlete_id
+    if not target_athlete_id:
+        link = db.query(CoachAthleteLinkDB).filter(
+            CoachAthleteLinkDB.coach_user_id == current_user.id
+        ).first()
+        if link:
+            target_athlete_id = link.athlete_id
+
+    if not target_athlete_id:
+        raise HTTPException(400, "Не найден атлет для привязки активностей")
+
     created = 0
+    cat_map = {
+        "Run": "run", "VirtualRun": "run",
+        "Ride": "bike", "VirtualRide": "bike",
+        "Swim": "swim",
+    }
     for act in activities:
         strava_id = f"strava_{act['id']}"
-        # Skip if already imported
-        existing = db.query(WorkoutDB).filter(WorkoutDB.source_file == strava_id).first()
+        # Skip if already imported for this athlete (guard against double-sync)
+        existing = db.query(WorkoutDB).filter(
+            WorkoutDB.source_file == strava_id,
+            WorkoutDB.athlete_id == target_athlete_id,
+        ).first()
         if existing:
             continue
 
-        cat_map = {
-            "Run": "run", "VirtualRun": "run",
-            "Ride": "bike", "VirtualRide": "bike",
-            "Swim": "swim",
-        }
         cat = cat_map.get(act.get("type", ""), "run")
         start_date = (act.get("start_date_local") or act.get("start_date") or "")[:10]
         dist_km = round(act.get("distance", 0) / 1000.0, 2)
@@ -1884,18 +1899,6 @@ def strava_sync(
                 route_geojson = json.dumps({"type": "LineString", "coordinates": coords})
             except Exception:
                 pass
-
-        # Determine athlete_id: use own profile or first linked athlete
-        target_athlete_id = current_user.athlete_id
-        if not target_athlete_id:
-            link = db.query(CoachAthleteLinkDB).filter(
-                CoachAthleteLinkDB.coach_user_id == current_user.id
-            ).first()
-            if link:
-                target_athlete_id = link.athlete_id
-
-        if not target_athlete_id:
-            continue  # no athlete to attach to — skip
 
         w = WorkoutDB(
             id=new_id(),

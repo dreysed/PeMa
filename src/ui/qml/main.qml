@@ -37,8 +37,10 @@ ApplicationWindow {
     property color easyColor:   "#22c55e"
     property color moderateColor:"#f59e0b"
     property color hardColor:   "#ef4444"
-    property color todayBg:     dark ? "#1a2744" : "#dbeafe"
-    property color selectedBg:  dark ? "#1f1a40" : "#ede9fe"
+    property color todayBg:          dark ? "#1a2744" : "#dbeafe"
+    property color selectedBg:       dark ? "#1f1a40" : "#ede9fe"
+    // Clearly muted background for days that belong to adjacent months
+    property color otherMonthBg:     dark ? "#111519" : "#e2e5ea"
 
     color: bg
     font.family: Qt.platform.os === "osx" ? ".AppleSystemUIFont" : "Segoe UI"
@@ -500,12 +502,12 @@ ApplicationWindow {
 
                                         color: day.isSelected ? selectedBg
                                              : day.isToday    ? todayBg
-                                             : day.inCurrentMonth ? surface : surface2
+                                             : day.inCurrentMonth ? surface : otherMonthBg
 
                                         border.width: day.isSelected ? 2 : day.isToday ? 1.5 : 1
                                         border.color: day.isSelected ? accent
                                                     : day.isToday    ? accentHover
-                                                    : border
+                                                    : day.inCurrentMonth ? border : Qt.darker(otherMonthBg, 1.08)
 
                                         MouseArea {
                                             id: hov; anchors.fill: parent
@@ -562,6 +564,7 @@ ApplicationWindow {
                                         Column {
                                             anchors { fill: parent; margins: 5 }
                                             spacing: 3
+                                            opacity: day.inCurrentMonth ? 1.0 : 0.55
 
                                             Label {
                                                 text: day.dayNumber
