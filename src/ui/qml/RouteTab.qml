@@ -123,8 +123,15 @@ Item {
                         var results = JSON.parse(xhr.responseText)
                         if (results.length > 0) {
                             var r = results[0]
-                            routeTab.genLat = parseFloat(r.lat)
-                            routeTab.genLon = parseFloat(r.lon)
+                            var lat = parseFloat(r.lat)
+                            var lon = parseFloat(r.lon)
+                            routeTab.genLat = lat
+                            routeTab.genLon = lon
+                            // Pan handler breaks the declarative binding, so we
+                            // explicitly push the new centre into the map too.
+                            theMap.centerLat = lat
+                            theMap.centerLon = lon
+                            theMap.zoom = 13
                             cityStatusLabel.text = r.display_name.split(",").slice(0, 2).join(",")
                         } else {
                             cityStatusLabel.text = "Город не найден"
