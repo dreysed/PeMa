@@ -259,9 +259,16 @@ ApplicationWindow {
                 Row {
                     spacing: 8
                     Rectangle {
-                        width: 28; height: 28; radius: 7; color: accent
+                        width: 28; height: 28; radius: 7
+                        color: "#06111e"
                         anchors.verticalCenter: parent.verticalCenter
-                        Label { anchors.centerIn: parent; text: "P"; font.pixelSize: 15; font.weight: Font.Black; color: "#fff" }
+                        clip: true
+                        Image {
+                            anchors.fill: parent
+                            source: "qrc:/logo.png"
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                        }
                     }
                     Label {
                         text: "PeMa"; font.pixelSize: 17; font.weight: Font.Bold
@@ -343,10 +350,30 @@ ApplicationWindow {
                         }
                     }
 
+                    // Import from watch button
+                    Rectangle {
+                        visible: workoutStore.isLoggedIn
+                        height: 32; width: importRow.implicitWidth + 20; radius: 8
+                        color: surface2; border.width: 1; border.color: border
+                        anchors.verticalCenter: parent.verticalCenter
+                        ToolTip.text: "Импорт тренировки с часов (.gpx/.fit)"
+                        ToolTip.visible: importHdrMa.containsMouse; ToolTip.delay: 400
+                        Row {
+                            id: importRow
+                            anchors.centerIn: parent; spacing: 5
+                            Label { text: "📥"; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: "Импорт"; font.pixelSize: 12; color: textPrimary; anchors.verticalCenter: parent.verticalCenter }
+                        }
+                        MouseArea {
+                            id: importHdrMa; anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor; hoverEnabled: true
+                            onClicked: globalImportFileDialog.open()
+                        }
+                    }
+
                     // Vertical separator
                     Rectangle {
                         width: 1; height: 22; color: border; opacity: 0.6
-                        visible: workoutStore.currentUserRole === "coach"
                         anchors.verticalCenter: parent.verticalCenter
                     }
 
@@ -1593,6 +1620,18 @@ ApplicationWindow {
                 var path = selectedFile.toString().replace("file://", "")
                 workoutStore.importWatchFile(watchImportDialog.workoutId, path)
             }
+        }
+    }
+
+    // ── Global import from watch (creates new workout) ───────────────────────
+    FileDialog {
+        id: globalImportFileDialog
+        title: "Выберите файл с часов (.gpx или .fit)"
+        nameFilters: ["GPS/Activity files (*.gpx *.fit)", "GPX files (*.gpx)", "FIT files (*.fit)", "All files (*)"]
+        onAccepted: {
+            var path = selectedFile.toString().replace("file://", "")
+            var ok = workoutStore.importNewWorkout(path)
+            if (!ok) console.log("Import failed")
         }
     }
 

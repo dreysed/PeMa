@@ -23,6 +23,8 @@ Item {
     property bool   stravaConnected: false
     property bool   stravaHasClientId: false
     property var    selectedRoute:  null
+    property string _editingRouteId:  ""  // id маршрута который сейчас редактируем
+    property string _pendingDeleteId: ""  // id маршрута который удалить после построения нового
 
     // ── Generation-batch tracking ─────────────────────────────────────────────
     property int  _batchSize:       0
@@ -41,6 +43,13 @@ Item {
     onRoutesModelChanged: {
         if (routeTab._batchSize > 0 && routeTab.routesModel.length > 0)
             routeTab.selectedRoute = routeTab.routesModel[0]
+
+        // Delete the old route AFTER the new one is confirmed in the model
+        if (routeTab._pendingDeleteId !== "") {
+            var idToDelete = routeTab._pendingDeleteId
+            routeTab._pendingDeleteId = ""
+            routeTab.deleteRouteRequested(idToDelete)
+        }
     }
 
     // ── Signals ───────────────────────────────────────────────────────────────
@@ -692,14 +701,14 @@ Item {
                                     var geo = JSON.parse(routeTab.selectedRoute.geojson)
                                     var coords = geo.coordinates || []
                                     if (coords.length < 2) return
-                                    var wps = []
-                                    var n = Math.min(10, coords.length)
-                                    for (var i = 0; i < n; i++) {
-                                        var idx = Math.round(i * (coords.length - 1) / (n - 1))
-                                        wps.push({ lon: coords[idx][0], lat: coords[idx][1] })
-                                    }
+                                    // Load ALL route points as editable waypoints
+                                    var wps = coords.map(function(c) { return { lon: c[0], lat: c[1] } })
                                     theMap.editWaypoints = wps
-                                    theMap.editMode = true
+                                    theMap.toolMode = "pen"
+                                    // Remember which route we're editing so we can replace it
+                                    routeTab._editingRouteId = routeTab.selectedRoute.id
+                                    // Hide the saved route — user now sees only the editable path
+                                    routeTab.routeCoords = []
                                 } catch(ex) {}
                             }
                         }
@@ -720,58 +729,116 @@ Item {
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left; anchors.right: parent.right
                 anchors.margins: 12
-                height: toolbarRow.implicitHeight + 16
-                radius: 10; color: surface + "f0"
+                height: toolbarRow.implicitHeight + 20
+                radius: 12; color: surface + "f2"
                 border.width: 1; border.color: borderCol
+
+                function haversinePath(wps) {
+                    if (!wps || wps.length < 2) return 0
+                    var R = 6371, total = 0
+                    for (var i = 1; i < wps.length; i++) {
+                        var dLat = (wps[i].lat - wps[i-1].lat) * Math.PI / 180
+                        var dLon = (wps[i].lon - wps[i-1].lon) * Math.PI / 180
+                        var a = Math.sin(dLat/2)*Math.sin(dLat/2) +
+                                Math.cos(wps[i-1].lat*Math.PI/180)*Math.cos(wps[i].lat*Math.PI/180)*
+                                Math.sin(dLon/2)*Math.sin(dLon/2)
+                        total += R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+                    }
+                    return total
+                }
 
                 RowLayout {
                     id: toolbarRow
-                    anchors.fill: parent; anchors.margins: 10
+                    anchors.fill: parent; anchors.margins: 12
                     spacing: 8
 
+                    // ── Pen button ────────────────────────────────────────────
                     Rectangle {
-                        height: 34; width: drawLbl.implicitWidth + 18; radius: 8
-                        color: theMap.editMode ? accent : surface2
-                        border.width: 1; border.color: theMap.editMode ? accent : borderCol
-                        Label {
-                            id: drawLbl; anchors.centerIn: parent
-                            text: theMap.editMode ? "Рисую…" : "Нарисовать маршрут"
-                            font.pixelSize: 12; font.weight: Font.DemiBold
-                            color: theMap.editMode ? "#fff" : textPrimary
+                        height: 36; width: penRow.implicitWidth + 20; radius: 9
+                        color: theMap.toolMode === "pen" ? "#f59e0b" : surface2
+                        border.width: 1; border.color: theMap.toolMode === "pen" ? "#f59e0b" : borderCol
+                        Row { id: penRow; anchors.centerIn: parent; spacing: 6
+                            Label { text: "✏️"; font.pixelSize: 15; anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: "Карандаш"; font.pixelSize: 13; font.weight: Font.DemiBold
+                                    color: theMap.toolMode === "pen" ? "#fff" : textPrimary
+                                    anchors.verticalCenter: parent.verticalCenter }
                         }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                            onClicked: theMap.editMode = !theMap.editMode }
+                            onClicked: theMap.toolMode = (theMap.toolMode === "pen" ? "none" : "pen") }
                     }
 
+                    // ── Eraser button ─────────────────────────────────────────
                     Rectangle {
-                        visible: theMap.editMode && theMap.editWaypoints.length > 0
-                        height: 34; width: undoLbl.implicitWidth + 18; radius: 8
-                        color: surface2; border.width: 1; border.color: borderCol
-                        Label { id: undoLbl; anchors.centerIn: parent; text: "← Отмена"; font.pixelSize: 12; color: textPrimary }
+                        height: 36; width: eraserRow.implicitWidth + 20; radius: 9
+                        color: theMap.toolMode === "eraser" ? "#ef4444" : surface2
+                        border.width: 1; border.color: theMap.toolMode === "eraser" ? "#ef4444" : borderCol
+                        visible: theMap.editWaypoints.length > 0
+                        Row { id: eraserRow; anchors.centerIn: parent; spacing: 6
+                            Label { text: "🧹"; font.pixelSize: 15; anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: "Ластик"; font.pixelSize: 13; font.weight: Font.DemiBold
+                                    color: theMap.toolMode === "eraser" ? "#fff" : textPrimary
+                                    anchors.verticalCenter: parent.verticalCenter }
+                        }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                            onClicked: theMap.removeLastWaypoint() }
+                            onClicked: theMap.toolMode = (theMap.toolMode === "eraser" ? "none" : "eraser") }
                     }
 
+                    // ── Clear all ─────────────────────────────────────────────
                     Rectangle {
-                        visible: theMap.editMode && theMap.editWaypoints.length > 0
-                        height: 34; width: clearLbl.implicitWidth + 18; radius: 8
+                        visible: theMap.editWaypoints.length > 0
+                        height: 36; width: clrRow.implicitWidth + 20; radius: 9
                         color: surface2; border.width: 1; border.color: borderCol
-                        Label { id: clearLbl; anchors.centerIn: parent; text: "Очистить"; font.pixelSize: 12; color: textMuted }
+                        Row { id: clrRow; anchors.centerIn: parent; spacing: 5
+                            Label { text: "✕"; font.pixelSize: 13; color: "#ef4444"; anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: "Очистить"; font.pixelSize: 13; color: textMuted; anchors.verticalCenter: parent.verticalCenter }
+                        }
                         MouseArea { anchors.fill: parent; cursorShape: Qt.PointingHandCursor
-                            onClicked: theMap.clearEditWaypoints() }
+                            onClicked: {
+                                theMap.clearEditWaypoints()
+                                theMap.toolMode = "none"
+                                routeTab._editingRouteId = ""
+                                routeTab._pendingDeleteId = ""
+                            }
+                        }
+                    }
+
+                    // ── Live distance ─────────────────────────────────────────
+                    Label {
+                        visible: theMap.editWaypoints.length >= 2
+                        text: "≈ " + parent.parent.haversinePath(theMap.editWaypoints).toFixed(1) + " км"
+                        font.pixelSize: 13; font.weight: Font.DemiBold; color: "#f59e0b"
                     }
 
                     Item { Layout.fillWidth: true }
 
+                    // ── Hint ──────────────────────────────────────────────────
+                    Label {
+                        visible: theMap.toolMode === "none" && theMap.editWaypoints.length === 0
+                        text: "Выберите карандаш и рисуйте маршрут прямо на карте"
+                        font.pixelSize: 11; color: textMuted
+                    }
+                    Label {
+                        visible: theMap.toolMode === "pen"
+                        text: "Зажмите и ведите мышью — рисуйте путь"
+                        font.pixelSize: 11; color: "#f59e0b"
+                    }
+                    Label {
+                        visible: theMap.toolMode === "eraser"
+                        text: "Зажмите и ведите по линии — стираете"
+                        font.pixelSize: 11; color: "#ef4444"
+                    }
+
+                    // ── Build route button ────────────────────────────────────
                     Rectangle {
-                        visible: theMap.editWaypoints.length >= 2
-                        height: 34; width: buildLbl.implicitWidth + 18; radius: 8
+                        visible: theMap.editWaypoints.length >= 10
+                        height: 36; width: bldRow.implicitWidth + 20; radius: 9
                         color: routeTab.isBusy ? borderCol : runColor
                         opacity: routeTab.isBusy ? 0.7 : 1.0
-                        Label {
-                            id: buildLbl; anchors.centerIn: parent
-                            text: routeTab.isBusy ? "Строю…" : "Построить маршрут"
-                            font.pixelSize: 12; font.weight: Font.DemiBold; color: "#fff"
+                        Row { id: bldRow; anchors.centerIn: parent; spacing: 6
+                            Label { text: routeTab.isBusy ? "⏳" : "🏃"; font.pixelSize: 14; anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: routeTab.isBusy ? "Строю…" : "Построить маршрут"
+                                    font.pixelSize: 13; font.weight: Font.Black; color: "#fff"
+                                    anchors.verticalCenter: parent.verticalCenter }
                         }
                         MouseArea { anchors.fill: parent; enabled: !routeTab.isBusy; cursorShape: Qt.PointingHandCursor
                             onClicked: {
@@ -780,17 +847,16 @@ Item {
                                     var wp = theMap.editWaypoints[i]
                                     wps.push([wp.lon, wp.lat])
                                 }
+                                // If editing existing route — schedule delete AFTER new one is built
+                                if (routeTab._editingRouteId !== "") {
+                                    routeTab._pendingDeleteId = routeTab._editingRouteId
+                                    routeTab._editingRouteId = ""
+                                }
                                 routeTab.buildFromWaypointsRequested(wps, "Мой маршрут")
                                 theMap.clearEditWaypoints()
-                                theMap.editMode = false
+                                theMap.toolMode = "none"
                             }
                         }
-                    }
-
-                    Label {
-                        visible: !theMap.editMode
-                        text: "Прокрутка для зума · Перетаскивание для перемещения"
-                        font.pixelSize: 10; color: textMuted
                     }
                 }
             }

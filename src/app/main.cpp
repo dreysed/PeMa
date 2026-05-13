@@ -2,14 +2,16 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QIcon>
 
 #include "backend/WorkoutStore.h"
 
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("Qt Calendar App"));
-    app.setOrganizationName(QStringLiteral("SportApp"));
+    app.setApplicationName(QStringLiteral("PeMa"));
+    app.setWindowIcon(QIcon(QStringLiteral(":/AppIcon.icns")));
+    app.setOrganizationName(QStringLiteral("PeMa"));
 
     QQuickStyle::setStyle(QStringLiteral("Fusion"));
 

@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import calendar as cal_module
 import json
+import math
+import random
 import os
 
 # Load .env if present (development convenience)
@@ -41,7 +43,7 @@ from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_PLEASE_SET_ENV_VAR")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 days
 
 DATABASE_URL = "sqlite:///./pema.db"
 
@@ -903,6 +905,72 @@ async def import_watch_file(
     return workout_to_card(w)
 
 
+@app.post("/api/workouts/import-new")
+async def import_new_workout(
+    file: UploadFile = File(...),
+    current_user: UserDB = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create a brand-new workout from a .gpx/.fit file, marked as done."""
+    target_athlete_id = current_user.athlete_id
+    if not target_athlete_id:
+        link = db.query(CoachAthleteLinkDB).filter(
+            CoachAthleteLinkDB.coach_user_id == current_user.id
+        ).first()
+        if link:
+            target_athlete_id = link.athlete_id
+    if not target_athlete_id:
+        raise HTTPException(400, "Не найден атлет для привязки тренировки")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Файл пустой")
+
+    name = (file.filename or "").lower()
+    try:
+        if name.endswith(".gpx"):
+            data = _parse_gpx(raw)
+        elif name.endswith(".fit"):
+            data = _parse_fit(raw)
+        else:
+            raise HTTPException(400, "Поддерживаются только .gpx и .fit файлы")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(400, f"Не удалось разобрать файл: {exc}")
+
+    dist_km  = data.get("distance_km") or 0.0
+    dur_min  = data.get("duration_min") or 0
+    date_str = (data.get("start_date") or Date.today().isoformat())[:10]
+    fname    = file.filename or "import"
+
+    w = WorkoutDB(
+        id=new_id(),
+        athlete_id=target_athlete_id,
+        title=fname.rsplit(".", 1)[0].replace("_", " ").strip() or "Импорт с часов",
+        category="run",
+        distance_km=dist_km,
+        duration_min=dur_min,
+        intensity="moderate",
+        status="done",
+        date=date_str,
+        notes=f"Импортировано из файла: {fname}",
+        source_file=fname,
+        actual_distance_km=dist_km,
+        actual_duration_min=dur_min,
+        actual_avg_pace=data.get("avg_pace"),
+        actual_avg_hr=data.get("avg_hr"),
+        actual_max_hr=data.get("max_hr"),
+        actual_calories=data.get("calories"),
+        actual_elevation_gain=data.get("elevation_gain"),
+        route_geojson=data.get("geojson"),
+    )
+    db.add(w)
+    db.commit()
+    db.refresh(w)
+    return workout_to_card(w)
+
+
 def _parse_gpx(raw: bytes) -> dict:
     import gpxpy
     text = raw.decode("utf-8", errors="ignore")
@@ -956,6 +1024,7 @@ def _parse_gpx(raw: bytes) -> dict:
         "calories":       None,
         "elevation_gain": round(elevation_gain_m, 1) if elevation_gain_m else None,
         "geojson":        geojson,
+        "start_date":     start_time.date().isoformat() if start_time else None,
     }
 
 
@@ -992,6 +1061,7 @@ def _parse_fit(raw: bytes) -> dict:
                 elev_max_gain += altitude - last_elev
             last_elev = altitude
 
+    start_date = None
     for sess in fit.get_messages("session"):
         v = {f.name: f.value for f in sess.fields}
         if v.get("total_distance") is not None and v["total_distance"] > total_distance_m:
@@ -1000,6 +1070,9 @@ def _parse_fit(raw: bytes) -> dict:
             elapsed_seconds = max(elapsed_seconds, int(v["total_elapsed_time"]))
         if v.get("total_calories"):
             calories = int(v["total_calories"])
+        if v.get("start_time") and start_date is None:
+            try: start_date = v["start_time"].date().isoformat()
+            except Exception: pass
 
     distance_km  = round(total_distance_m / 1000.0, 2)
     duration_min = int(elapsed_seconds / 60) if elapsed_seconds else None
@@ -1021,6 +1094,7 @@ def _parse_fit(raw: bytes) -> dict:
         "calories":       calories,
         "elevation_gain": round(elev_max_gain, 1) if elev_max_gain else None,
         "geojson":        geojson,
+        "start_date":     start_date,
     }
 
 
@@ -1477,7 +1551,6 @@ class RouteGenerateRequest(BaseModel):
 
 def _haversine_km(coords: list) -> float:
     """Sum of great-circle distances along a coordinate list [[lon, lat], ...]."""
-    import math
     total = 0.0
     for i in range(1, len(coords)):
         lon1, lat1 = coords[i - 1][0], coords[i - 1][1]
@@ -1529,53 +1602,109 @@ def delete_route(
     db.commit()
 
 
+def _snap_to_road(lon: float, lat: float, client) -> list:
+    """Snap coordinate to nearest road via OSRM nearest."""
+    try:
+        resp = client.get(
+            f"http://router.project-osrm.org/nearest/v1/foot/{lon},{lat}?number=1",
+            timeout=6,
+        )
+        if resp.status_code == 200:
+            wps = resp.json().get("waypoints", [])
+            if wps:
+                return wps[0]["location"]
+    except Exception:
+        pass
+    return [lon, lat]
+
+
+def _osrm_trip(waypoints: list, client) -> tuple[list, float] | None:
+    """Call OSRM /trip roundtrip. Returns (coords, km) or None on failure."""
+    coords_str = ";".join(f"{p[0]},{p[1]}" for p in waypoints)
+    try:
+        resp = client.get(
+            f"http://router.project-osrm.org/trip/v1/foot/{coords_str}"
+            f"?roundtrip=true&source=first&overview=full&geometries=geojson",
+            timeout=12,
+        )
+        if resp.status_code == 200:
+            trips = resp.json().get("trips", [])
+            if trips:
+                return trips[0]["geometry"]["coordinates"], trips[0].get("distance", 0) / 1000.0
+    except Exception:
+        pass
+    return None
+
+
+def _build_loop(lon: float, lat: float, radius_km: float,
+                x_stretch: float, y_stretch: float, angles: list) -> list:
+    """Build geometric waypoints on an ellipse (without closing duplicate)."""
+    dlat = radius_km * y_stretch / 111.0
+    dlon = radius_km * x_stretch / (111.0 * max(math.cos(math.radians(lat)), 0.01))
+    wps = [[lon, lat]]
+    for a in angles:
+        wps.append([lon + dlon * math.cos(a), lat + dlat * math.sin(a)])
+    return wps   # no closing point — trip handles that
+
+
+def _osrm_route(waypoints: list) -> tuple[list, float]:
+    """Snap waypoints to roads then build a closed trip. Returns (coords, km).
+    Raises RuntimeError if OSRM is unavailable so caller can skip iteration."""
+    import httpx
+    wps = waypoints[:-1] if len(waypoints) > 1 and waypoints[0] == waypoints[-1] else waypoints
+    with httpx.Client(timeout=15) as client:
+        snapped = [_snap_to_road(p[0], p[1], client) for p in wps]
+        result = _osrm_trip(snapped, client)
+    if result is None:
+        raise RuntimeError("OSRM unavailable")
+    return result
+
+
 def _generate_one_route(lat: float, lon: float, target_km: float,
                          preferences: str, locality_name: str,
                          user_id: str, db) -> "RouteDB":
     """Build and persist a single randomised circular route. Called N times per request."""
-    import math, random, httpx
+    # Roads are ~35% longer than straight-line for loop routes.
+    n_points = 3   # triangle — fewest waypoints, least chance of tentacles
 
-    n_points  = random.randint(3, 5)
-    radius_km = target_km / (2 * math.pi)
-
-    # Elliptical distortion: stretch one axis to create variety
-    # (x_stretch, y_stretch) sum kept near 2 so total perimeter ≈ target
-    x_stretch = random.uniform(0.55, 1.55)
-    y_stretch  = random.uniform(0.55, 1.55)
-
-    dlat = radius_km * y_stretch / 111.0
-    dlon = radius_km * x_stretch / (111.0 * max(math.cos(math.radians(lat)), 0.01))
-
-    # Non-uniform angular spacing — more organic shape
-    raw_angles = sorted(random.uniform(0, 2 * math.pi) for _ in range(n_points))
-    # Ensure minimum separation so waypoints aren't too close together
+    x_stretch = random.uniform(0.88, 1.12)
+    y_stretch = random.uniform(0.88, 1.12)
     start_angle = random.uniform(0, 2 * math.pi)
+    angles = [
+        start_angle + (2 * math.pi * i / n_points) + random.uniform(-0.17, 0.17)
+        for i in range(n_points)
+    ]
 
-    waypoints: list = [[lon, lat]]
-    for i, ang in enumerate(raw_angles):
-        perturb = random.uniform(0.55, 1.55)   # wider radius variation
-        a = start_angle + ang
-        waypoints.append([lon + dlon * perturb * math.cos(a),
-                           lat + dlat * perturb * math.sin(a)])
-    waypoints.append([lon, lat])
+    # Initial radius guess — roads are ~35% longer than crow-fly on circular routes
+    radius_km = target_km / (2 * math.pi * 1.35)
+    geojson_coords = None
+    actual_dist = 0.0
 
-    coords_str    = ";".join(f"{p[0]},{p[1]}" for p in waypoints)
-    geojson_coords = waypoints
-    actual_dist   = _haversine_km(waypoints)
+    # Iterative scaling: build → OSRM → measure → scale → repeat.
+    # If OSRM is unavailable we abort immediately (no haversine fallback
+    # that would corrupt the scale factor and produce a 15-km route).
+    import httpx
+    with httpx.Client(timeout=15) as client:
+        for attempt in range(4):
+            wps = _build_loop(lon, lat, radius_km, x_stretch, y_stretch, angles)
+            snapped = [_snap_to_road(p[0], p[1], client) for p in wps]
+            result = _osrm_trip(snapped, client)
+            if result is None:
+                break   # OSRM down — keep whatever we had
+            geojson_coords, actual_dist = result
+            if actual_dist <= 0:
+                break
+            error = abs(actual_dist - target_km) / target_km
+            if error < 0.07:   # within 7% — good enough
+                break
+            # Proportional scale: if we got 8 km for a 5 km target → radius × 5/8
+            radius_km *= target_km / actual_dist
 
-    try:
-        with httpx.Client(timeout=15) as client:
-            resp = client.get(
-                f"http://router.project-osrm.org/route/v1/foot/{coords_str}"
-                f"?overview=full&geometries=geojson&continue_straight=false"
-            )
-        if resp.status_code == 200:
-            routes = resp.json().get("routes", [])
-            if routes:
-                geojson_coords = routes[0]["geometry"]["coordinates"]
-                actual_dist    = routes[0].get("distance", 0) / 1000.0
-    except Exception:
-        pass
+    if geojson_coords is None:
+        # OSRM completely unavailable — use straight-line geometry as fallback
+        wps = _build_loop(lon, lat, radius_km, x_stretch, y_stretch, angles)
+        geojson_coords = wps + [wps[0]]
+        actual_dist = _haversine_km(geojson_coords)
 
     route_name  = f"{locality_name} · {actual_dist:.1f} км" if locality_name else f"Маршрут {actual_dist:.1f} км"
     description = f"Круговой маршрут {actual_dist:.1f} км"
@@ -1649,30 +1778,22 @@ def route_from_waypoints(
     current_user: UserDB = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Build a route from user-drawn waypoints via OSRM, then save."""
+    """Build a route from user-drawn waypoints via OSRM trip (closed loop), then save."""
     import httpx
 
     wps = data.waypoints
     if len(wps) < 2:
         raise HTTPException(400, "Нужно минимум 2 точки")
 
-    coords_str = ";".join(f"{p[0]},{p[1]}" for p in wps)
-    geojson_coords = wps
-    actual_dist = _haversine_km(wps)   # fallback: straight-line distance
+    import httpx
+    geojson_coords = wps + [wps[0]]
+    actual_dist = _haversine_km(geojson_coords)
 
-    try:
-        with httpx.Client(timeout=15) as client:
-            resp = client.get(
-                f"http://router.project-osrm.org/route/v1/foot/{coords_str}"
-                f"?overview=full&geometries=geojson&continue_straight=false"
-            )
-        if resp.status_code == 200:
-            rdata = resp.json().get("routes", [])
-            if rdata:
-                geojson_coords = rdata[0]["geometry"]["coordinates"]
-                actual_dist = rdata[0].get("distance", 0) / 1000.0
-    except Exception:
-        pass   # keep Haversine fallback
+    with httpx.Client(timeout=15) as client:
+        snapped = [_snap_to_road(p[0], p[1], client) for p in wps]
+        result = _osrm_trip(snapped, client)
+        if result:
+            geojson_coords, actual_dist = result
 
     geojson = json.dumps({"type": "LineString", "coordinates": geojson_coords})
     route = RouteDB(
@@ -1835,20 +1956,28 @@ def strava_sync(
             raise HTTPException(401, "Не удалось обновить токен Strava. Переподключитесь.")
 
     try:
+        activities = []
         with httpx.Client(timeout=15) as client:
-            resp = client.get(
-                "https://www.strava.com/api/v3/athlete/activities",
-                headers={"Authorization": f"Bearer {current_user.strava_access_token}"},
-                params={"per_page": 30, "page": 1},
-            )
-        if resp.status_code == 401:
-            current_user.strava_access_token = None
-            db.commit()
-            raise HTTPException(401, "Strava отклонила токен. Переподключитесь.")
-        if resp.status_code != 200:
-            raise HTTPException(502, f"Strava API error {resp.status_code}")
-
-        activities = resp.json()
+            page = 1
+            while True:
+                resp = client.get(
+                    "https://www.strava.com/api/v3/athlete/activities",
+                    headers={"Authorization": f"Bearer {current_user.strava_access_token}"},
+                    params={"per_page": 100, "page": page},
+                )
+                if resp.status_code == 401:
+                    current_user.strava_access_token = None
+                    db.commit()
+                    raise HTTPException(401, "Strava отклонила токен. Переподключитесь.")
+                if resp.status_code != 200:
+                    raise HTTPException(502, f"Strava API error {resp.status_code}")
+                batch = resp.json()
+                if not batch:
+                    break
+                activities.extend(batch)
+                if len(batch) < 100:
+                    break
+                page += 1
     except httpx.RequestError as e:
         raise HTTPException(502, f"Ошибка сети: {e}")
 

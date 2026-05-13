@@ -186,6 +186,7 @@ public:
     // ── Watch import ──────────────────────────────────────────────────────────
     Q_INVOKABLE bool importWatchFile(const QString &workoutId,
                                      const QString &localPath);
+    Q_INVOKABLE bool importNewWorkout(const QString &localPath);
 
     // ── Routes ────────────────────────────────────────────────────────────────
     Q_INVOKABLE void generateRoute(double lat, double lon,

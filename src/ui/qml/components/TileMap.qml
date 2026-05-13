@@ -21,15 +21,20 @@ Item {
     property string tileServer: "http://localhost:8000/api/tiles"
 
     // ── Edit mode ─────────────────────────────────────────────────────────────
-    property bool editMode: false
-    property var  editWaypoints: []
-    signal waypointAdded()
+    // toolMode: "none" | "pen" | "eraser"
+    property string toolMode: "none"
+    property bool   editMode: toolMode !== "none"   // backward compat
+    property var    editWaypoints: []
+    property real   eraserRadius: 20   // px
 
-    function addWaypoint(lat, lon) {
-        var wps = editWaypoints.slice()
-        wps.push({ lat: lat, lon: lon })
-        editWaypoints = wps
-        waypointAdded()
+    // Minimum pixel distance between recorded pen points (avoids over-sampling)
+    property real _lastPenX: -999
+    property real _lastPenY: -999
+    property real _penMinDist: 8
+
+    function clearEditWaypoints() {
+        editWaypoints = []
+        _lastPenX = -999; _lastPenY = -999
         routeCanvas.requestPaint()
     }
     function removeLastWaypoint() {
@@ -37,12 +42,8 @@ Item {
         editWaypoints = editWaypoints.slice(0, editWaypoints.length - 1)
         routeCanvas.requestPaint()
     }
-    function clearEditWaypoints() {
-        editWaypoints = []
-        routeCanvas.requestPaint()
-    }
 
-    // Repaint when waypoints are changed externally (e.g. loading a route for editing)
+    // Repaint when waypoints are changed externally
     onEditWaypointsChanged: routeCanvas.requestPaint()
 
     // ── Mercator helpers ──────────────────────────────────────────────────────
@@ -244,29 +245,30 @@ Item {
                     ctx.beginPath(); ctx.arc(pn.x, pn.y, 5, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
                 }
 
-                // ── Edit waypoints preview ────────────────────────────────────
+                // ── Freehand drawing preview ──────────────────────────────────
                 var wps = tileMap.editWaypoints
-                if (wps && wps.length >= 1) {
-                    ctx.setLineDash([6, 4])
-                    ctx.strokeStyle = tileMap.lineColor; ctx.lineWidth = 2.5
-                    ctx.globalAlpha = 0.85; ctx.lineCap = "round"; ctx.lineJoin = "round"
-                    ctx.beginPath()
+                if (wps && wps.length >= 2) {
                     var ep0 = tileMap.latLonToScreen(wps[0].lat, wps[0].lon)
-                    ctx.moveTo(ep0.x, ep0.y)
+                    // White halo
+                    ctx.strokeStyle = "white"; ctx.lineWidth = 6
+                    ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.globalAlpha = 0.6
+                    ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(ep0.x, ep0.y)
                     for (var wi = 1; wi < wps.length; wi++) {
                         var ep = tileMap.latLonToScreen(wps[wi].lat, wps[wi].lon)
                         ctx.lineTo(ep.x, ep.y)
                     }
-                    ctx.stroke(); ctx.setLineDash([])
-                    for (var di = 0; di < wps.length; di++) {
-                        var dp = tileMap.latLonToScreen(wps[di].lat, wps[di].lon)
-                        ctx.globalAlpha = 1.0
-                        ctx.fillStyle = "white"; ctx.strokeStyle = tileMap.lineColor; ctx.lineWidth = 2
-                        ctx.beginPath(); ctx.arc(dp.x, dp.y, 8, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
-                        ctx.fillStyle = tileMap.lineColor; ctx.font = "bold 9px sans-serif"
-                        ctx.textAlign = "center"; ctx.textBaseline = "middle"
-                        ctx.fillText(String(di + 1), dp.x, dp.y)
+                    ctx.stroke()
+                    // Colored line
+                    ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 3
+                    ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.moveTo(ep0.x, ep0.y)
+                    for (var wj = 1; wj < wps.length; wj++) {
+                        var ep2 = tileMap.latLonToScreen(wps[wj].lat, wps[wj].lon)
+                        ctx.lineTo(ep2.x, ep2.y)
                     }
+                    ctx.stroke(); ctx.globalAlpha = 1.0
+                    // Start dot
+                    ctx.fillStyle = "#22c55e"; ctx.strokeStyle = "white"; ctx.lineWidth = 2
+                    ctx.beginPath(); ctx.arc(ep0.x, ep0.y, 6, 0, Math.PI * 2); ctx.fill(); ctx.stroke()
                 }
             }
         }
@@ -303,78 +305,92 @@ Item {
         }
     }
 
-    // ── Edit mode badge (top-right) ───────────────────────────────────────────
+    // ── Tool mode badge (top-right) ───────────────────────────────────────────
     Rectangle {
-        visible: tileMap.editMode
+        visible: tileMap.toolMode !== "none"
         anchors { top: parent.top; right: parent.right; margins: 8 }
-        height: 24; width: editLbl.implicitWidth + 16; radius: 6
-        color: tileMap.lineColor; z: 30
-        Label { id: editLbl; anchors.centerIn: parent
-                text: "✏ " + tileMap.editWaypoints.length + " точек  ·  клик — добавить  ·  клик по точке — удалить"
+        height: 26; width: toolBadgeLbl.implicitWidth + 16; radius: 7
+        color: tileMap.toolMode === "eraser" ? "#ef4444" : "#f59e0b"; z: 30
+        Label { id: toolBadgeLbl; anchors.centerIn: parent
+                text: tileMap.toolMode === "pen"
+                      ? "✏️  Рисование — зажмите и ведите"
+                      : "🧹  Ластик — зажмите и ведите по линии"
                 font.pixelSize: 10; font.weight: Font.DemiBold; color: "#fff" }
     }
 
-    // ── Mouse: pan + zoom + edit clicks ──────────────────────────────────────
+    // ── Mouse: pan + zoom + pen/eraser ───────────────────────────────────────
     MouseArea {
         id: panMa
         anchors.fill: parent; z: 20
-        cursorShape: tileMap.editMode ? Qt.CrossCursor : Qt.OpenHandCursor
-
-        property bool _didDrag: false
+        cursorShape: {
+            if (tileMap.toolMode === "pen")    return Qt.CrossCursor
+            if (tileMap.toolMode === "eraser") return Qt.BlankCursor
+            return Qt.OpenHandCursor
+        }
 
         onPressed: function(e) {
-            _didDrag = false
             tileMap._dragX   = e.x;  tileMap._dragY   = e.y
             tileMap._dragLat = tileMap.centerLat
             tileMap._dragLon = tileMap.centerLon
-            cursorShape = tileMap.editMode ? Qt.CrossCursor : Qt.ClosedHandCursor
+            tileMap._lastPenX = -999; tileMap._lastPenY = -999
+            if (tileMap.toolMode === "none")
+                cursorShape = Qt.ClosedHandCursor
         }
 
         onPositionChanged: function(e) {
             if (!pressed) return
-            var dx = e.x - tileMap._dragX
-            var dy = e.y - tileMap._dragY
-            // 5 px threshold — gives click actions room to breathe (especially on trackpad)
-            if (Math.abs(dx) > 5 || Math.abs(dy) > 5) _didDrag = true
-            tileMap._panOffX = dx
-            tileMap._panOffY = dy
+
+            if (tileMap.toolMode === "pen") {
+                // Record point only if moved enough pixels (avoids over-sampling)
+                var dx0 = e.x - tileMap._lastPenX
+                var dy0 = e.y - tileMap._lastPenY
+                if (dx0*dx0 + dy0*dy0 >= tileMap._penMinDist * tileMap._penMinDist) {
+                    var ll = tileMap.screenToLatLon(e.x, e.y)
+                    var wps = tileMap.editWaypoints.slice()
+                    wps.push({ lat: ll.lat, lon: ll.lon })
+                    tileMap.editWaypoints = wps
+                    tileMap._lastPenX = e.x; tileMap._lastPenY = e.y
+                    routeCanvas.requestPaint()
+                }
+                return
+            }
+
+            if (tileMap.toolMode === "eraser") {
+                var r = tileMap.eraserRadius
+                tileMap.editWaypoints = tileMap.editWaypoints.filter(function(wp) {
+                    var sp = tileMap.latLonToScreen(wp.lat, wp.lon)
+                    var dx = e.x - sp.x, dy = e.y - sp.y
+                    return dx*dx + dy*dy > r*r
+                })
+                routeCanvas.requestPaint()
+                eraserCursor.x = e.x - eraserCursor.width / 2
+                eraserCursor.y = e.y - eraserCursor.height / 2
+                return
+            }
+
+            // Pan mode
+            var ddx = e.x - tileMap._dragX
+            var ddy = e.y - tileMap._dragY
+            tileMap._panOffX = ddx
+            tileMap._panOffY = ddy
         }
 
         onReleased: function(e) {
-            cursorShape = tileMap.editMode ? Qt.CrossCursor : Qt.OpenHandCursor
-            if (!_didDrag) return
-            // Commit pan — works in both view and edit mode so the user can
-            // navigate the map while drawing waypoints
-            var dx = e.x - tileMap._dragX
-            var dy = e.y - tileMap._dragY
-            var sc = tileMap._scale()
-            tileMap.centerLon = tileMap._dragLon - dx * 360 / sc
-            tileMap.centerLat = tileMap._worldYToLat(tileMap._latToWorld(tileMap._dragLat) - dy)
-            tileMap._panOffX = 0
-            tileMap._panOffY = 0
-        }
-
-        onClicked: function(e) {
-            if (!tileMap.editMode || _didDrag) return
-            var wps = tileMap.editWaypoints
-            // Click within 16 px of an existing waypoint → delete that waypoint
-            for (var i = 0; i < wps.length; i++) {
-                var sp = tileMap.latLonToScreen(wps[i].lat, wps[i].lon)
-                var ddx = e.x - sp.x; var ddy = e.y - sp.y
-                if (ddx * ddx + ddy * ddy <= 16 * 16) {
-                    var nw = wps.slice(); nw.splice(i, 1)
-                    tileMap.editWaypoints = nw
-                    return
+            if (tileMap.toolMode === "none") {
+                cursorShape = Qt.OpenHandCursor
+                var dx = e.x - tileMap._dragX
+                var dy = e.y - tileMap._dragY
+                if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+                    var sc = tileMap._scale()
+                    tileMap.centerLon = tileMap._dragLon - dx * 360 / sc
+                    tileMap.centerLat = tileMap._worldYToLat(tileMap._latToWorld(tileMap._dragLat) - dy)
                 }
+                tileMap._panOffX = 0
+                tileMap._panOffY = 0
             }
-            // Otherwise add a new waypoint at the clicked position
-            var ll = tileMap.screenToLatLon(e.x, e.y)
-            tileMap.addWaypoint(ll.lat, ll.lon)
         }
 
         onWheel: function(e) {
-            // Throttle: trackpad fires many tiny events — accumulate until 60 units,
-            // then lock for 180 ms so a fast swipe doesn't fly to max/min zoom.
             if (zoomCooldown.running) { e.accepted = true; return }
             tileMap._wheelAccum += e.angleDelta.y
             if (tileMap._wheelAccum >= 60) {
@@ -390,5 +406,17 @@ Item {
             }
             e.accepted = true
         }
+    }
+
+    // Visual eraser circle cursor
+    Rectangle {
+        id: eraserCursor
+        visible: tileMap.toolMode === "eraser" && panMa.pressed
+        width:  tileMap.eraserRadius * 2
+        height: tileMap.eraserRadius * 2
+        radius: tileMap.eraserRadius
+        color: "transparent"
+        border.color: "#ef4444"; border.width: 2
+        z: 25
     }
 }

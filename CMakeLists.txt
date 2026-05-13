@@ -21,10 +21,14 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
 
 qt_standard_project_setup()
 
+set(APP_ICON_MACOS "${CMAKE_CURRENT_SOURCE_DIR}/resources/AppIcon.icns")
+set_source_files_properties(${APP_ICON_MACOS} PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
+
 qt_add_executable(PeMa
   src/app/main.cpp
   src/backend/WorkoutStore.cpp
   resources/resources.qrc
+  ${APP_ICON_MACOS}
 )
 
 target_include_directories(PeMa PRIVATE src)
@@ -40,6 +44,7 @@ target_link_libraries(PeMa PRIVATE
 
 set_target_properties(PeMa PROPERTIES
   MACOSX_BUNDLE TRUE
+  MACOSX_BUNDLE_ICON_FILE AppIcon
 )
 
 if (WIN32)

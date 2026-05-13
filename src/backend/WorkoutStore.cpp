@@ -1103,6 +1103,68 @@ bool WorkoutStore::importWatchFile(const QString &workoutId, const QString &loca
     return true;
 }
 
+bool WorkoutStore::importNewWorkout(const QString &localPath)
+{
+    QString cleaned = localPath;
+    if (cleaned.startsWith(QStringLiteral("file://")))
+        cleaned = QUrl(cleaned).toLocalFile();
+
+    QFile f(cleaned);
+    if (!f.open(QIODevice::ReadOnly)) {
+        setError(QStringLiteral("Не удалось открыть файл: ") + cleaned);
+        return false;
+    }
+    const QByteArray fileBytes = f.readAll();
+    f.close();
+
+    const QString fileName = QFileInfo(cleaned).fileName();
+    const QString boundary = QStringLiteral("----PeMaBoundary%1")
+                                .arg(QDateTime::currentMSecsSinceEpoch());
+
+    QByteArray body;
+    body.append("--" + boundary.toUtf8() + "\r\n");
+    body.append("Content-Disposition: form-data; name=\"file\"; filename=\""
+                + fileName.toUtf8() + "\"\r\n");
+    body.append("Content-Type: application/octet-stream\r\n\r\n");
+    body.append(fileBytes);
+    body.append("\r\n--" + boundary.toUtf8() + "--\r\n");
+
+    QNetworkRequest req(QUrl(m_baseUrl + QStringLiteral("/api/workouts/import-new")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader,
+                  QByteArray("multipart/form-data; boundary=") + boundary.toUtf8());
+    if (!m_token.isEmpty())
+        req.setRawHeader(QByteArray("Authorization"),
+                         QByteArray("Bearer ") + m_token.toUtf8());
+
+    setBusy(true);
+    QEventLoop loop;
+    auto *reply = m_nam->post(req, body);
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray respBody = reply->readAll();
+    reply->deleteLater();
+    setBusy(false);
+
+    if (status == 401) { handleUnauthorized(); return false; }
+    if (status >= 400) {
+        QJsonParseError err;
+        const auto doc = QJsonDocument::fromJson(respBody, &err);
+        QString msg = QStringLiteral("Ошибка импорта (HTTP %1)").arg(status);
+        if (doc.isObject() && doc.object().contains(QStringLiteral("detail")))
+            msg = doc.object().value(QStringLiteral("detail")).toString();
+        setError(msg);
+        return false;
+    }
+
+    fetchCalendar();
+    fetchDayWorkouts();
+    fetchAnalytics();
+    fetchGoals();
+    return true;
+}
+
 // ─── Routes ──────────────────────────────────────────────────────────────────
 
 void WorkoutStore::fetchRoutes()

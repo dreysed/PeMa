@@ -70,12 +70,12 @@ Rectangle {
             RowLayout {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: 10
-                Rectangle {
-                    width: 38; height: 38; radius: 10; color: accent
-                    Label {
-                        anchors.centerIn: parent; text: "P"
-                        font.pixelSize: 20; font.weight: Font.Black; color: "#fff"
-                    }
+                Image {
+                    Layout.preferredWidth: 38
+                    Layout.preferredHeight: 38
+                    source: "qrc:/logo.png"
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true
                 }
                 Label {
                     text: "PeMa"
