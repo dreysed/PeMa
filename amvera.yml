@@ -6,4 +6,4 @@ build:
   requirementsPath: api/requirements.txt
 
 run:
-  command: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+  command: sh -c "cd api && uvicorn main:app --host 0.0.0.0 --port $PORT"
