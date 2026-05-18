@@ -289,7 +289,7 @@ private:
 
     // ── Network ───────────────────────────────────────────────────────────────
     QNetworkAccessManager *m_nam     = nullptr;
-    QString                m_baseUrl = QStringLiteral("http://localhost:8000");
+    QString                m_baseUrl = QStringLiteral("https://amvera-dressed-run-pema.amvera.io");
 
     // ── Auth ──────────────────────────────────────────────────────────────────
     QString m_token;
