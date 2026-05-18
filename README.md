@@ -2,6 +2,9 @@
 
 # PeMa — Personal Training Manager
 
+Creative work of students from group RIS-25-1b Parkhomenko Roman and Mekhonoshin Anton on the topic:
+Development of an automated workplace for a sports trainer
+
 Desktop application for planning and tracking workouts. A coach creates training plans, athletes execute them and log results.
 
 Built with **Qt 6 / QML** + **Python FastAPI**.
