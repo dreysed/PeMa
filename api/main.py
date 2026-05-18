@@ -1,7 +1,8 @@
 """
-PeMa API v2 — FastAPI + SQLAlchemy (SQLite)
+PeMa API v2 — FastAPI + SQLAlchemy
 Auth: JWT Bearer tokens, bcrypt passwords
 Run: uvicorn api.main:app --reload --port 8000
+DB:  set DATABASE_URL env var for PostgreSQL, defaults to local SQLite
 """
 from __future__ import annotations
 
@@ -37,6 +38,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import (
     Boolean, Column, Float, ForeignKey, Integer, String, Text, create_engine,
 )
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 # ─── Config ──────────────────────────────────────────────────────────────────
@@ -45,11 +47,12 @@ SECRET_KEY = os.getenv("SECRET_KEY", "CHANGE_ME_IN_PRODUCTION_PLEASE_SET_ENV_VAR
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30  # 30 days
 
-DATABASE_URL = "sqlite:///./pema.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./pema.db")
 
 # ─── Database ────────────────────────────────────────────────────────────────
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+_connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(DATABASE_URL, connect_args=_connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -505,19 +508,20 @@ def _migrate_schema():
         "strava_token_expiry":  "INTEGER",
         "strava_athlete_id":    "TEXT",
     }
+    insp = sa_inspect(engine)
     with engine.begin() as conn:
-        existing_w = {row[1] for row in conn.execute(text("PRAGMA table_info(workouts)"))}
+        existing_w = {c["name"] for c in insp.get_columns("workouts")}
         for col, sql_type in new_workout_cols.items():
             if col not in existing_w:
                 conn.execute(text(f"ALTER TABLE workouts ADD COLUMN {col} {sql_type}"))
 
-        existing_u = {row[1] for row in conn.execute(text("PRAGMA table_info(users)"))}
+        existing_u = {c["name"] for c in insp.get_columns("users")}
         for col, sql_type in new_user_cols.items():
             if col not in existing_u:
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {sql_type}"))
 
         # coach_athlete_links: notes column
-        existing_cal = {row[1] for row in conn.execute(text("PRAGMA table_info(coach_athlete_links)"))}
+        existing_cal = {c["name"] for c in insp.get_columns("coach_athlete_links")}
         if "notes" not in existing_cal:
             conn.execute(text("ALTER TABLE coach_athlete_links ADD COLUMN notes TEXT DEFAULT ''"))
 
@@ -1969,6 +1973,8 @@ def strava_sync(
                     current_user.strava_access_token = None
                     db.commit()
                     raise HTTPException(401, "Strava отклонила токен. Переподключитесь.")
+                if resp.status_code == 403:
+                    raise HTTPException(403, "Strava: доступ запрещён (403). Возможные причины: 1) приложение в Trial-режиме — только владелец может синхронизировать; 2) неверный scope — отключитесь от Strava и подключитесь заново.")
                 if resp.status_code != 200:
                     raise HTTPException(502, f"Strava API error {resp.status_code}")
                 batch = resp.json()
