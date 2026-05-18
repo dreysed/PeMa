@@ -1,9 +1,14 @@
 meta:
   environment: python
-  toolVersion: "3.11"
-
+  toolchain:
+    name: pip
+    version: "3.11"
 build:
   requirementsPath: api/requirements.txt
-
+  useCache: true
 run:
-  command: sh -c "cd api && uvicorn main:app --host 0.0.0.0 --port $PORT"
+  scriptName: null
+  command: "sh -c 'cd api && uvicorn main:app --host 0.0.0.0 --port 80'"
+  persistenceMount: /data
+  containerPort: "80"
+  servicePort: "80"
