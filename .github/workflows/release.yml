@@ -2,8 +2,7 @@ name: Build & Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
 
 jobs:
@@ -11,7 +10,7 @@ jobs:
   # ── macOS → PeMa-mac.dmg ────────────────────────────────────────────────────
   build-macos:
     name: macOS (DMG)
-    runs-on: macos-14
+    runs-on: macos-13        # Intel runner — совместим с clang_64 Qt
     steps:
       - uses: actions/checkout@v4
 
@@ -22,7 +21,7 @@ jobs:
           host: 'mac'
           target: 'desktop'
           arch: 'clang_64'
-          cache: true
+          cache: false
 
       - name: Сборка
         run: |
@@ -32,13 +31,15 @@ jobs:
 
       - name: Упаковка в DMG
         run: |
-          $QT_ROOT_DIR/bin/macdeployqt build/PeMa.app -qmldir src/ui/qml
+          # Ищем macdeployqt в Qt install directory
+          MACDEPLOYQT=$(find /Users/runner -name macdeployqt -type f 2>/dev/null | head -1)
+          echo "macdeployqt: $MACDEPLOYQT"
+          "$MACDEPLOYQT" build/PeMa.app -qmldir src/ui/qml
 
           mkdir dmg-stage
           cp -R build/PeMa.app dmg-stage/
           ln -sf /Applications dmg-stage/Applications
-
-          hdiutil create -volname "PeMa" -srcfolder dmg-stage -ov -format UDRW tmp.dmg
+          hdiutil create -volname PeMa -srcfolder dmg-stage -ov -format UDRW tmp.dmg
           hdiutil convert tmp.dmg -format UDZO -o PeMa-mac.dmg
 
       - uses: actions/upload-artifact@v4
@@ -60,7 +61,7 @@ jobs:
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
-          cache: true
+          cache: false
 
       - name: Настройка MSVC
         uses: ilammy/msvc-dev-cmd@v1
@@ -74,11 +75,10 @@ jobs:
           cmake .. -DCMAKE_BUILD_TYPE=Release -G "Visual Studio 17 2022" -A x64
           cmake --build . --config Release --parallel
 
-      - name: Упаковка DLL (windeployqt)
+      - name: Упаковка (windeployqt)
         run: |
           mkdir installer\windows-stage
           copy build\Release\PeMa.exe installer\windows-stage\
-          # windeployqt добавлен в PATH действием install-qt-action
           windeployqt --release --no-translations --qmldir src\ui\qml installer\windows-stage\PeMa.exe
 
       - name: Создание установщика (Inno Setup)
@@ -93,7 +93,7 @@ jobs:
   # ── Linux → PeMa-linux.AppImage ─────────────────────────────────────────────
   build-linux:
     name: Linux (AppImage)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -108,8 +108,7 @@ jobs:
             libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev \
             libxcb-randr0-dev libxcb-render-util0-dev \
             libxcb-xinerama0-dev libxcb-shape0-dev \
-            libxcb-cursor0 libxcb-cursor-dev \
-            fuse libfuse2 libfuse2t64 || true
+            patchelf wget
 
       - name: Установка Qt
         uses: jurplel/install-qt-action@v3
@@ -118,7 +117,7 @@ jobs:
           host: 'linux'
           target: 'desktop'
           arch: 'linux_gcc_64'
-          cache: true
+          cache: false
 
       - name: Сборка
         run: |
@@ -128,30 +127,67 @@ jobs:
 
       - name: Подготовка AppDir
         run: |
-          mkdir -p AppDir/usr/bin
+          QT=$QT_ROOT_DIR
+          mkdir -p AppDir/usr/bin AppDir/usr/lib
+          mkdir -p AppDir/usr/plugins/platforms AppDir/usr/plugins/tls AppDir/usr/plugins/imageformats
+          mkdir -p AppDir/usr/qml
+
           cp build/PeMa AppDir/usr/bin/
 
-          printf '[Desktop Entry]\nName=PeMa\nComment=Sports training calendar\nExec=PeMa\nIcon=AppIcon\nType=Application\nCategories=Sports;Health;\n' > AppDir/PeMa.desktop
+          # Qt shared libraries
+          cp -P $QT/lib/libQt6Core.so*              AppDir/usr/lib/
+          cp -P $QT/lib/libQt6Gui.so*               AppDir/usr/lib/
+          cp -P $QT/lib/libQt6Network.so*           AppDir/usr/lib/
+          cp -P $QT/lib/libQt6Qml.so*               AppDir/usr/lib/
+          cp -P $QT/lib/libQt6QmlMeta.so*           AppDir/usr/lib/
+          cp -P $QT/lib/libQt6QmlModels.so*         AppDir/usr/lib/
+          cp -P $QT/lib/libQt6QmlWorkerScript.so*   AppDir/usr/lib/
+          cp -P $QT/lib/libQt6Quick.so*             AppDir/usr/lib/
+          cp -P $QT/lib/libQt6QuickControls2.so*    AppDir/usr/lib/
+          cp -P $QT/lib/libQt6QuickTemplates2.so*   AppDir/usr/lib/
+          cp -P $QT/lib/libQt6OpenGL.so*            AppDir/usr/lib/
+          cp -P $QT/lib/libQt6DBus.so*              AppDir/usr/lib/
+          cp -P $QT/lib/libicudata.so*              AppDir/usr/lib/
+          cp -P $QT/lib/libicui18n.so*              AppDir/usr/lib/
+          cp -P $QT/lib/libicuuc.so*                AppDir/usr/lib/
 
+          # Qt plugins
+          cp $QT/plugins/platforms/libqxcb.so       AppDir/usr/plugins/platforms/ 2>/dev/null || true
+          cp $QT/plugins/platforms/libqoffscreen.so AppDir/usr/plugins/platforms/ 2>/dev/null || true
+          cp $QT/plugins/tls/*.so                   AppDir/usr/plugins/tls/        2>/dev/null || true
+          cp $QT/plugins/imageformats/*.so           AppDir/usr/plugins/imageformats/ 2>/dev/null || true
+
+          # QML modules (Quick + Controls)
+          cp -r $QT/qml/QtQml           AppDir/usr/qml/ 2>/dev/null || true
+          cp -r $QT/qml/QtQuick         AppDir/usr/qml/ 2>/dev/null || true
+          cp -r "$QT/qml/Qt"            AppDir/usr/qml/ 2>/dev/null || true
+
+          # qt.conf — сообщает приложению где плагины и QML
+          printf '[Paths]\nPlugins=../plugins\nQml=../qml\n' > AppDir/usr/bin/qt.conf
+
+          # Desktop entry
+          printf '[Desktop Entry]\nName=PeMa\nExec=PeMa\nIcon=AppIcon\nType=Application\nCategories=Sports;Health;\n' > AppDir/PeMa.desktop
+
+          # Иконка
           cp resources/AppIcon_rounded.png AppDir/AppIcon.png
+
+          # AppRun — точка входа AppImage
+          cat > AppDir/AppRun << 'APPRUN'
+#!/bin/bash
+HERE="$(dirname "$(readlink -f "$0")")"
+export LD_LIBRARY_PATH="$HERE/usr/lib:$LD_LIBRARY_PATH"
+export QT_PLUGIN_PATH="$HERE/usr/plugins"
+export QML2_IMPORT_PATH="$HERE/usr/qml"
+exec "$HERE/usr/bin/PeMa" "$@"
+APPRUN
+          chmod +x AppDir/AppRun
 
       - name: Сборка AppImage
         run: |
-          wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
-          wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
-          chmod +x linuxdeploy*.AppImage
-
-          # GitHub Actions не поддерживает FUSE — используем режим extract-and-run
           export APPIMAGE_EXTRACT_AND_RUN=1
-          export QMAKE=$QT_ROOT_DIR/bin/qmake
-          export VERSION=1.0.0
-
-          ARCH=x86_64 ./linuxdeploy-x86_64.AppImage \
-            --appdir AppDir \
-            --plugin qt \
-            --output appimage
-
-          find . -maxdepth 1 -name "PeMa*.AppImage" -exec mv {} PeMa-linux.AppImage \;
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage"
+          chmod +x appimagetool-x86_64.AppImage
+          ARCH=x86_64 ./appimagetool-x86_64.AppImage AppDir PeMa-linux.AppImage
 
       - uses: actions/upload-artifact@v4
         with:
