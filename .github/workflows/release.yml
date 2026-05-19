@@ -26,7 +26,7 @@ jobs:
       - name: Сборка
         run: |
           mkdir build && cd build
-          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=x86_64
           cmake --build . --parallel $(sysctl -n hw.logicalcpu)
 
       - name: Упаковка в DMG
