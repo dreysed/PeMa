@@ -127,7 +127,8 @@ jobs:
 
       - name: Подготовка AppDir
         run: |
-          QT=$QT_ROOT_DIR
+          QT=$(qmake -query QT_INSTALL_PREFIX)
+          echo "Qt root: $QT"
           mkdir -p AppDir/usr/bin AppDir/usr/lib
           mkdir -p AppDir/usr/plugins/platforms AppDir/usr/plugins/tls AppDir/usr/plugins/imageformats
           mkdir -p AppDir/usr/qml
