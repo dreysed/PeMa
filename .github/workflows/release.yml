@@ -167,7 +167,7 @@ jobs:
           printf '[Paths]\nPlugins=../plugins\nQml=../qml\n' > AppDir/usr/bin/qt.conf
 
           # Desktop entry
-          printf '[Desktop Entry]\nName=PeMa\nExec=PeMa\nIcon=AppIcon\nType=Application\nCategories=Sports;Health;\n' > AppDir/PeMa.desktop
+          printf '[Desktop Entry]\nName=PeMa\nExec=PeMa\nIcon=AppIcon\nType=Application\nCategories=Utility;\n' > AppDir/PeMa.desktop
 
           # Иконка
           cp resources/AppIcon_rounded.png AppDir/AppIcon.png
