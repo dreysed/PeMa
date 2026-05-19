@@ -79,10 +79,13 @@ bool WorkoutStore::tryRestoreSession()
 
 void WorkoutStore::applyAuthResponse(const QJsonObject &obj)
 {
-    m_token            = obj[QStringLiteral("access_token")].toString();
-    m_currentUserName  = obj[QStringLiteral("name")].toString();
-    m_currentUserRole  = obj[QStringLiteral("role")].toString();
-    m_currentAthleteId = obj[QStringLiteral("athlete_id")].toString();
+    // Use .value() instead of operator[] to get QJsonValue copies,
+    // not QJsonValueConstRef references — avoids SIGSEGV if internal
+    // container pointer is null (Qt 6.8 regression with certain JSON states).
+    m_token            = obj.value(QStringLiteral("access_token")).toString();
+    m_currentUserName  = obj.value(QStringLiteral("name")).toString();
+    m_currentUserRole  = obj.value(QStringLiteral("role")).toString();
+    m_currentAthleteId = obj.value(QStringLiteral("athlete_id")).toString();
 
     // For athletes their athleteId doubles as the selected athlete
     if (m_currentUserRole == QStringLiteral("athlete") && !m_currentAthleteId.isEmpty())
@@ -119,36 +122,34 @@ void WorkoutStore::loginUser(const QString &email, const QString &password)
     req.setHeader(QNetworkRequest::ContentTypeHeader, QByteArray("application/json"));
     auto *reply = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
 
-    QEventLoop loop;
-    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
+    // Fully async — no QEventLoop inside a QML invokable.
+    // Using QEventLoop here caused SIGSEGV: Qt's event processing while
+    // blocked on the QML call stack invalidated internal JSON pointers.
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
 
-    const int      status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    const QByteArray data = reply->readAll();
-    reply->deleteLater();
+        const int        status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray data   = reply->readAll();
 
-    if (status == 200) {
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (doc.isObject()) {
-            applyAuthResponse(doc.object());
-            // Defer initialLoad so loginUser returns to QML before
-            // spawning more synchronous QEventLoops — prevents SIGSEGV
-            // from nested event loops on the QML call stack.
-            QTimer::singleShot(0, this, &WorkoutStore::initialLoad);
-            return;
+        if (status == 200) {
+            QJsonDocument doc = QJsonDocument::fromJson(data);
+            if (doc.isObject()) {
+                applyAuthResponse(doc.object());
+                initialLoad();
+                return;
+            }
         }
-    }
 
-    // Error path — extract server message
-    QString errMsg;
-    QJsonDocument errDoc = QJsonDocument::fromJson(data);
-    if (errDoc.isObject()) {
-        const auto detail = errDoc.object()[QStringLiteral("detail")];
-        if (detail.isString()) errMsg = detail.toString();
-    }
-    if (errMsg.isEmpty()) errMsg = QStringLiteral("Неверный email или пароль");
-    setAuthError(errMsg);
-    emit loginFailed(errMsg);
+        QString errMsg;
+        QJsonDocument errDoc = QJsonDocument::fromJson(data);
+        if (errDoc.isObject()) {
+            const QJsonValue detail = errDoc.object().value(QStringLiteral("detail"));
+            if (detail.isString()) errMsg = detail.toString();
+        }
+        if (errMsg.isEmpty()) errMsg = QStringLiteral("Неверный email или пароль");
+        setAuthError(errMsg);
+        emit loginFailed(errMsg);
+    });
 }
 
 void WorkoutStore::registerUser(const QString &email, const QString &name,
@@ -167,40 +168,38 @@ void WorkoutStore::registerUser(const QString &email, const QString &name,
     req.setHeader(QNetworkRequest::ContentTypeHeader, QByteArray("application/json"));
     auto *reply = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
 
-    QEventLoop loop;
-    connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-    loop.exec();
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        reply->deleteLater();
 
-    const int      status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    const QByteArray data = reply->readAll();
-    reply->deleteLater();
+        const int        status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+        const QByteArray data   = reply->readAll();
 
-    if (status == 201) {
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (doc.isObject()) {
-            applyAuthResponse(doc.object());
-            QTimer::singleShot(0, this, &WorkoutStore::initialLoad);
-            return;
+        if (status == 201) {
+            QJsonDocument doc = QJsonDocument::fromJson(data);
+            if (doc.isObject()) {
+                applyAuthResponse(doc.object());
+                initialLoad();
+                return;
+            }
         }
-    }
 
-    // Error — handle Pydantic validation array or plain string
-    QString errMsg;
-    QJsonDocument errDoc = QJsonDocument::fromJson(data);
-    if (errDoc.isObject()) {
-        const auto detail = errDoc.object()[QStringLiteral("detail")];
-        if (detail.isString()) {
-            errMsg = detail.toString();
-        } else if (detail.isArray()) {
-            QStringList msgs;
-            for (const auto &v : detail.toArray())
-                msgs << v.toObject()[QStringLiteral("msg")].toString();
-            errMsg = msgs.join(QStringLiteral("; "));
+        QString errMsg;
+        QJsonDocument errDoc = QJsonDocument::fromJson(data);
+        if (errDoc.isObject()) {
+            const QJsonValue detail = errDoc.object().value(QStringLiteral("detail"));
+            if (detail.isString()) {
+                errMsg = detail.toString();
+            } else if (detail.isArray()) {
+                QStringList msgs;
+                for (const QJsonValue &v : detail.toArray())
+                    msgs << v.toObject().value(QStringLiteral("msg")).toString();
+                errMsg = msgs.join(QStringLiteral("; "));
+            }
         }
-    }
-    if (errMsg.isEmpty()) errMsg = QStringLiteral("Ошибка регистрации");
-    setAuthError(errMsg);
-    emit loginFailed(errMsg);
+        if (errMsg.isEmpty()) errMsg = QStringLiteral("Ошибка регистрации");
+        setAuthError(errMsg);
+        emit loginFailed(errMsg);
+    });
 }
 
 void WorkoutStore::logout()
