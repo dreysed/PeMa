@@ -10,7 +10,7 @@ jobs:
   # ── macOS → PeMa-mac.dmg ────────────────────────────────────────────────────
   build-macos:
     name: macOS (DMG)
-    runs-on: macos-13        # Intel runner — совместим с clang_64 Qt
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -31,10 +31,9 @@ jobs:
 
       - name: Упаковка в DMG
         run: |
-          # Ищем macdeployqt в Qt install directory
-          MACDEPLOYQT=$(find /Users/runner -name macdeployqt -type f 2>/dev/null | head -1)
-          echo "macdeployqt: $MACDEPLOYQT"
-          "$MACDEPLOYQT" build/PeMa.app -qmldir src/ui/qml
+          # Qt6_DIR = корень Qt installation (например /Users/runner/work/PeMa/Qt/6.8.3/macos)
+          echo "Qt6_DIR: $Qt6_DIR"
+          "$Qt6_DIR/bin/macdeployqt" build/PeMa.app -qmldir src/ui/qml
 
           mkdir dmg-stage
           cp -R build/PeMa.app dmg-stage/
