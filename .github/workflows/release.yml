@@ -133,15 +133,7 @@ jobs:
           mkdir -p AppDir/usr/bin
           cp build/PeMa AppDir/usr/bin/
 
-          cat > AppDir/PeMa.desktop << 'EOF'
-[Desktop Entry]
-Name=PeMa
-Comment=Sports training calendar
-Exec=PeMa
-Icon=AppIcon
-Type=Application
-Categories=Sports;Health;
-EOF
+          printf '[Desktop Entry]\nName=PeMa\nComment=Sports training calendar\nExec=PeMa\nIcon=AppIcon\nType=Application\nCategories=Sports;Health;\n' > AppDir/PeMa.desktop
 
           cp resources/AppIcon_rounded.png AppDir/AppIcon.png
 
