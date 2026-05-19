@@ -131,7 +131,10 @@ void WorkoutStore::loginUser(const QString &email, const QString &password)
         QJsonDocument doc = QJsonDocument::fromJson(data);
         if (doc.isObject()) {
             applyAuthResponse(doc.object());
-            initialLoad();
+            // Defer initialLoad so loginUser returns to QML before
+            // spawning more synchronous QEventLoops — prevents SIGSEGV
+            // from nested event loops on the QML call stack.
+            QTimer::singleShot(0, this, &WorkoutStore::initialLoad);
             return;
         }
     }
@@ -176,7 +179,7 @@ void WorkoutStore::registerUser(const QString &email, const QString &name,
         QJsonDocument doc = QJsonDocument::fromJson(data);
         if (doc.isObject()) {
             applyAuthResponse(doc.object());
-            initialLoad();
+            QTimer::singleShot(0, this, &WorkoutStore::initialLoad);
             return;
         }
     }
