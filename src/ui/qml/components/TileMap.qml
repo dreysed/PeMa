@@ -18,7 +18,7 @@ Item {
     property var    routeCoords: []       // [[lon, lat], …]
     property color  lineColor:  "#6366f1"
     property bool   dark:       false
-    property string tileServer: "http://localhost:8000/api/tiles"
+    property string tileServer: "https://pema-dressed.amvera.io/api/tiles"
 
     // ── Edit mode ─────────────────────────────────────────────────────────────
     // toolMode: "none" | "pen" | "eraser"
