@@ -33,9 +33,7 @@ jobs:
       - name: Упаковка в DMG
         run: |
           # macdeployqt добавлен в PATH действием install-qt-action
-          macdeployqt build/PeMa.app \
-            --qmldir=src/ui/qml \
-            -always-overwrite
+          macdeployqt build/PeMa.app -qmldir src/ui/qml
 
           mkdir dmg-stage
           cp -R build/PeMa.app dmg-stage/
