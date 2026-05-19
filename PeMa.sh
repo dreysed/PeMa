@@ -1,10 +1,13 @@
 #!/bin/bash
-# PeMa.command — запуск с автообновлением (macOS)
-# Положи этот файл куда угодно, дважды кликни — готово.
+# PeMa.sh — запуск с автообновлением (Linux)
+# chmod +x PeMa.sh && ./PeMa.sh
 
 REPO="dreysed/PeMa"
-APP_PATH="$HOME/Applications/PeMa.app"
-VERSION_FILE="$HOME/Applications/.PeMa-version"
+DATA_DIR="$HOME/.local/share/PeMa"
+VERSION_FILE="$DATA_DIR/.version"
+APPIMAGE="$DATA_DIR/PeMa.AppImage"
+
+mkdir -p "$DATA_DIR"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  PeMa Launcher"
@@ -21,19 +24,12 @@ if [ -z "$LATEST" ]; then
 else
     CURRENT=$(cat "$VERSION_FILE" 2>/dev/null || echo "none")
 
-    if [ "$LATEST" != "$CURRENT" ]; then
+    if [ "$LATEST" != "$CURRENT" ] || [ ! -f "$APPIMAGE" ]; then
         echo "📦 Скачиваем PeMa $LATEST..."
         curl -L --progress-bar \
-            "https://github.com/$REPO/releases/download/$LATEST/PeMa-mac.dmg" \
-            -o /tmp/PeMa-update.dmg
-
-        echo "📂 Устанавливаем..."
-        hdiutil attach /tmp/PeMa-update.dmg -mountpoint /Volumes/PeMaUpdate -quiet -nobrowse
-        rm -rf "$APP_PATH"
-        mkdir -p "$HOME/Applications"
-        cp -R "/Volumes/PeMaUpdate/PeMa.app" "$APP_PATH"
-        hdiutil detach /Volumes/PeMaUpdate -quiet
-        rm /tmp/PeMa-update.dmg
+            "https://github.com/$REPO/releases/download/$LATEST/PeMa-linux.AppImage" \
+            -o "$APPIMAGE"
+        chmod +x "$APPIMAGE"
         echo "$LATEST" > "$VERSION_FILE"
         echo "✅ Обновлено до $LATEST"
     else
@@ -43,4 +39,4 @@ fi
 
 echo ""
 echo "🚀 Запуск PeMa..."
-open "$APP_PATH"
+exec "$APPIMAGE"
