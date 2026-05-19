@@ -33,7 +33,7 @@ jobs:
         run: |
           # Qt6_DIR = корень Qt installation (например /Users/runner/work/PeMa/Qt/6.8.3/macos)
           echo "Qt6_DIR: $Qt6_DIR"
-          "$Qt6_DIR/bin/macdeployqt" build/PeMa.app -qmldir src/ui/qml
+          "$Qt6_DIR/bin/macdeployqt" build/PeMa.app -qmldir="$GITHUB_WORKSPACE/src/ui/qml"
 
           mkdir dmg-stage
           cp -R build/PeMa.app dmg-stage/
