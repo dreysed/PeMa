@@ -32,8 +32,7 @@ jobs:
 
       - name: Упаковка в DMG
         run: |
-          # macdeployqt добавлен в PATH действием install-qt-action
-          macdeployqt build/PeMa.app -qmldir src/ui/qml
+          $QT_ROOT_DIR/bin/macdeployqt build/PeMa.app -qmldir src/ui/qml
 
           mkdir dmg-stage
           cp -R build/PeMa.app dmg-stage/
@@ -94,7 +93,7 @@ jobs:
   # ── Linux → PeMa-linux.AppImage ─────────────────────────────────────────────
   build-linux:
     name: Linux (AppImage)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -110,7 +109,7 @@ jobs:
             libxcb-randr0-dev libxcb-render-util0-dev \
             libxcb-xinerama0-dev libxcb-shape0-dev \
             libxcb-cursor0 libxcb-cursor-dev \
-            fuse libfuse2
+            fuse libfuse2 libfuse2t64 || true
 
       - name: Установка Qt
         uses: jurplel/install-qt-action@v3
@@ -142,7 +141,9 @@ jobs:
           wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
           chmod +x linuxdeploy*.AppImage
 
-          export QMAKE=$(which qmake)
+          # GitHub Actions не поддерживает FUSE — используем режим extract-and-run
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export QMAKE=$QT_ROOT_DIR/bin/qmake
           export VERSION=1.0.0
 
           ARCH=x86_64 ./linuxdeploy-x86_64.AppImage \
