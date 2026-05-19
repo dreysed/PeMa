@@ -3,83 +3,66 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'v*'          # Запускается при пуше тега v1.0.0, v1.2.3 и т.д.
-  workflow_dispatch:  # Можно запустить вручную из GitHub UI
+      - 'v*'
+  workflow_dispatch:
 
 jobs:
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # macOS — создаёт PeMa-mac.dmg
-  # ──────────────────────────────────────────────────────────────────────────
+  # ── macOS → PeMa-mac.dmg ────────────────────────────────────────────────────
   build-macos:
     name: macOS (DMG)
     runs-on: macos-14
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Установка Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v3
         with:
           version: '6.8.3'
           host: 'mac'
           target: 'desktop'
           arch: 'clang_64'
-          modules: 'qtpositioning qtlocation'
           cache: true
 
       - name: Сборка
         run: |
-          mkdir build-release && cd build-release
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_PREFIX_PATH="$Qt6_DIR"
-          cmake --build . --config Release --parallel $(sysctl -n hw.logicalcpu)
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
+          cmake --build . --parallel $(sysctl -n hw.logicalcpu)
 
-      - name: Упаковка macdeployqt + DMG
+      - name: Упаковка в DMG
         run: |
-          cd build-release
-          $Qt6_DIR/bin/macdeployqt PeMa.app \
-            --qmldir=$GITHUB_WORKSPACE/src/ui/qml \
+          # macdeployqt добавлен в PATH действием install-qt-action
+          macdeployqt build/PeMa.app \
+            --qmldir=src/ui/qml \
             -always-overwrite
 
-          # Создаём DMG с drag-to-Applications
           mkdir dmg-stage
-          cp -R PeMa.app dmg-stage/
+          cp -R build/PeMa.app dmg-stage/
           ln -sf /Applications dmg-stage/Applications
 
-          hdiutil create \
-            -volname "PeMa" \
-            -srcfolder dmg-stage \
-            -ov -format UDRW tmp.dmg
-
+          hdiutil create -volname "PeMa" -srcfolder dmg-stage -ov -format UDRW tmp.dmg
           hdiutil convert tmp.dmg -format UDZO -o PeMa-mac.dmg
-          mv PeMa-mac.dmg ..
 
-      - name: Загрузка артефакта
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: PeMa-mac
           path: PeMa-mac.dmg
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # Windows — создаёт PeMa-Setup.exe (Inno Setup)
-  # ──────────────────────────────────────────────────────────────────────────
+  # ── Windows → PeMa-Setup.exe ────────────────────────────────────────────────
   build-windows:
     name: Windows (Setup EXE)
     runs-on: windows-2022
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Установка Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v3
         with:
           version: '6.8.3'
           host: 'windows'
           target: 'desktop'
           arch: 'win64_msvc2022_64'
-          modules: 'qtpositioning qtlocation'
           cache: true
 
       - name: Настройка MSVC
@@ -89,50 +72,31 @@ jobs:
 
       - name: Сборка
         run: |
-          mkdir build-windows
-          cd build-windows
-          cmake .. `
-            -DCMAKE_BUILD_TYPE=Release `
-            -DCMAKE_PREFIX_PATH="$env:Qt6_DIR" `
-            -G "Visual Studio 17 2022" -A x64
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -G "Visual Studio 17 2022" -A x64
           cmake --build . --config Release --parallel
 
-      - name: windeployqt
+      - name: Упаковка DLL (windeployqt)
         run: |
           mkdir installer\windows-stage
-          copy build-windows\Release\PeMa.exe installer\windows-stage\
-          & "$env:Qt6_DIR\bin\windeployqt.exe" `
-              --release `
-              --no-translations `
-              --qmldir src\ui\qml `
-              installer\windows-stage\PeMa.exe
+          copy build\Release\PeMa.exe installer\windows-stage\
+          # windeployqt добавлен в PATH действием install-qt-action
+          windeployqt --release --no-translations --qmldir src\ui\qml installer\windows-stage\PeMa.exe
 
-      - name: Конвертация иконки (png → ico)
+      - name: Создание установщика (Inno Setup)
         run: |
-          if (Test-Path "resources/AppIcon_rounded.png") {
-            # Inno Setup может использовать .ico; если нет — пропускаем
-            Copy-Item "resources/AppIcon_rounded.png" "installer/AppIcon.png"
-          }
-
-      - name: Inno Setup → Setup EXE
-        run: |
-          # Inno Setup предустановлен на windows-2022 runners
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer\PeMa.iss
-        continue-on-error: false
 
-      - name: Загрузка артефакта
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: PeMa-windows
           path: installer\PeMa-Setup.exe
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # Linux — создаёт PeMa-linux.AppImage
-  # ──────────────────────────────────────────────────────────────────────────
+  # ── Linux → PeMa-linux.AppImage ─────────────────────────────────────────────
   build-linux:
     name: Linux (AppImage)
     runs-on: ubuntu-22.04
-
     steps:
       - uses: actions/checkout@v4
 
@@ -140,137 +104,91 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y \
-            libgl1-mesa-dev \
-            libglib2.0-dev \
-            libdbus-1-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libx11-dev \
-            libxext-dev \
-            libxfixes-dev \
-            libxi-dev \
-            libxrender-dev \
-            libxcb1-dev \
-            libxcb-glx0-dev \
-            libxkbcommon-x11-dev \
-            libxcb-icccm4-dev \
-            libxcb-image0-dev \
-            libxcb-keysyms1-dev \
-            libxcb-randr0-dev \
-            libxcb-render-util0-dev \
-            libxcb-xinerama0-dev \
-            libxcb-shape0-dev \
-            fuse
+            libgl1-mesa-dev libglib2.0-dev libdbus-1-dev \
+            libfontconfig1-dev libfreetype6-dev \
+            libx11-dev libxext-dev libxfixes-dev libxi-dev libxrender-dev \
+            libxcb1-dev libxcb-glx0-dev libxkbcommon-x11-dev \
+            libxcb-icccm4-dev libxcb-image0-dev libxcb-keysyms1-dev \
+            libxcb-randr0-dev libxcb-render-util0-dev \
+            libxcb-xinerama0-dev libxcb-shape0-dev \
+            fuse libfuse2
 
       - name: Установка Qt
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v3
         with:
           version: '6.8.3'
           host: 'linux'
           target: 'desktop'
           arch: 'linux_gcc_64'
-          modules: 'qtpositioning qtlocation'
           cache: true
 
       - name: Сборка
         run: |
-          mkdir build-linux && cd build-linux
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$(pwd)/AppDir/usr" \
-            -DCMAKE_PREFIX_PATH="$Qt6_DIR"
+          mkdir build && cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release
           cmake --build . --parallel $(nproc)
-          cmake --install .
 
       - name: Подготовка AppDir
         run: |
-          cd build-linux
-          APPDIR=$(pwd)/AppDir
+          mkdir -p AppDir/usr/bin
+          cp build/PeMa AppDir/usr/bin/
 
-          cat > $APPDIR/PeMa.desktop << 'EOF'
-          [Desktop Entry]
-          Name=PeMa
-          Comment=Спортивный календарь тренировок
-          Exec=PeMa
-          Icon=AppIcon
-          Type=Application
-          Categories=Sports;Health;
-          EOF
+          cat > AppDir/PeMa.desktop << 'EOF'
+[Desktop Entry]
+Name=PeMa
+Comment=Sports training calendar
+Exec=PeMa
+Icon=AppIcon
+Type=Application
+Categories=Sports;Health;
+EOF
 
-          if [ -f "$GITHUB_WORKSPACE/resources/AppIcon_rounded.png" ]; then
-            cp "$GITHUB_WORKSPACE/resources/AppIcon_rounded.png" "$APPDIR/AppIcon.png"
-          fi
-
-          cat > $APPDIR/AppRun << 'APPRUN'
-          #!/bin/bash
-          SELF=$(readlink -f "$0")
-          HERE="${SELF%/*}"
-          export QT_PLUGIN_PATH="$HERE/usr/lib/qt6/plugins:$QT_PLUGIN_PATH"
-          export QML2_IMPORT_PATH="$HERE/usr/lib/qt6/qml:$QML2_IMPORT_PATH"
-          exec "$HERE/usr/bin/PeMa" "$@"
-          APPRUN
-          chmod +x $APPDIR/AppRun
+          cp resources/AppIcon_rounded.png AppDir/AppIcon.png
 
       - name: Сборка AppImage
         run: |
-          cd build-linux
           wget -q "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
           wget -q "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
           chmod +x linuxdeploy*.AppImage
 
-          export QMAKE="$Qt6_DIR/bin/qmake"
-          export OUTPUT="$GITHUB_WORKSPACE/PeMa-linux.AppImage"
+          export QMAKE=$(which qmake)
+          export VERSION=1.0.0
 
-          ./linuxdeploy-x86_64.AppImage \
+          ARCH=x86_64 ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --plugin qt \
             --output appimage
 
-          # Перемещаем готовый файл в корень
-          mv PeMa*.AppImage "$OUTPUT" 2>/dev/null || true
+          find . -maxdepth 1 -name "PeMa*.AppImage" -exec mv {} PeMa-linux.AppImage \;
 
-      - name: Загрузка артефакта
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: PeMa-linux
           path: PeMa-linux.AppImage
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # Публикация релиза на GitHub
-  # ──────────────────────────────────────────────────────────────────────────
+  # ── Публикация GitHub Release ────────────────────────────────────────────────
   release:
     name: Публикация релиза
     needs: [build-macos, build-windows, build-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-
     permissions:
       contents: write
-
     steps:
-      - name: Скачиваем все артефакты
-        uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v4
 
-      - name: Создаём GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v1
         with:
           name: "PeMa ${{ github.ref_name }}"
           body: |
             ## PeMa ${{ github.ref_name }}
 
-            ### Установка
-
-            | Платформа | Файл | Инструкция |
-            |-----------|------|-----------|
-            | 🍎 macOS  | `PeMa-mac.dmg` | Открыть DMG → перетащить в Applications |
+            | Платформа | Файл | Как установить |
+            |-----------|------|----------------|
+            | 🍎 macOS | `PeMa-mac.dmg` | Открыть DMG → перетащить в Applications |
             | 🪟 Windows | `PeMa-Setup.exe` | Запустить установщик |
-            | 🐧 Linux  | `PeMa-linux.AppImage` | `chmod +x PeMa-linux.AppImage && ./PeMa-linux.AppImage` |
-
-            ### Требования
-            - Подключение к интернету (бэкенд на Amvera)
+            | 🐧 Linux | `PeMa-linux.AppImage` | `chmod +x PeMa-linux.AppImage && ./PeMa-linux.AppImage` |
           files: |
             PeMa-mac/PeMa-mac.dmg
             PeMa-windows/PeMa-Setup.exe
             PeMa-linux/PeMa-linux.AppImage
-          draft: false
-          prerelease: false
